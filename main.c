@@ -50,8 +50,8 @@ int main(void)
             printf("\t\tDELETE DEADLINE\n\n");
             printf("Title: ");
             char* Title = read_line();
-            del_dl(&List, Title);
-            printf("%s is deleted!\n\n", Title);
+            unsigned int del_dl_error = del_dl(&List, Title);
+            if(del_dl_error) printf("%s is deleted!\n\n", Title);
         }
         else if(strcmp(cmd, "o") == 0 || strcmp(cmd, "ok") == 0)
         {
