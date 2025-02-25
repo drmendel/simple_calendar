@@ -80,7 +80,7 @@ void print_list(struct deadline*, int);
 //shows deadlines with countdown
 void str_cd_list(struct deadline*, int, stringList** buffer);
 //deletes one deadline
-void del_dl(struct deadline**, char*);
+unsigned int del_dl(struct deadline**, char*);
 //finishes a deadline
 void ok_dl(struct deadline**, char*);
 //sets deadline to incomplete
