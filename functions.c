@@ -542,7 +542,7 @@ struct deadline* new_dl(struct deadline* List)
     new->ok=0;
     return new;
 }
-void del_dl(struct deadline** List, char* Title)
+unsigned int del_dl(struct deadline** List, char* Title)
 {
     struct deadline* current = *List;
     struct deadline* prev = NULL;
@@ -556,7 +556,7 @@ void del_dl(struct deadline** List, char* Title)
     if(current == NULL)
     {
         printf("Couldnt find this deadline: %s", Title);
-        return;
+        return 1;
     }
     //The deadline to be deleted is the first one
     if (prev == NULL)
@@ -573,6 +573,8 @@ void del_dl(struct deadline** List, char* Title)
     free(current->place);
     free(current->note);
     free(current);
+    
+    return 0;
 }
 void ok_dl(struct deadline** List, char* Title)
 {
