@@ -35,11 +35,11 @@ Additionally, it includes a countdown feature based on the current time to keep 
 You can use the following commands in the terminal:
 
 ```bash
-      sudo apt update                                           # make your system up to date
-      sudo apt install gcc                                      # probaly understandable
-      gcc --version                                             # check if gcc is available
-      gcc main.c functions.c -i icon.o -o SimpleCalendar        # make sure that you are not compiling a virus
-      .\SimpleCalendar                                          # run the program and enjoy your life
+sudo apt update                                           # make your system up to date
+sudo apt install gcc                                      # probaly understandable
+gcc --version                                             # check if gcc is available
+gcc main.c functions.c -i icon.o -o SimpleCalendar        # make sure that you are not compiling a virus
+.\SimpleCalendar                                          # run the program and enjoy your life
 ```
 
 <br>
