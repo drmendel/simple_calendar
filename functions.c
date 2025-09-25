@@ -592,7 +592,7 @@ void ok_dl(struct deadline** List, char* Title)
     }
     //Skip deadline to delete it
     current->ok=1;
-    printf("%s is finished!", Title);
+    printf("%s is now finished!", Title);
 }
 void not_dl(struct deadline** List, char* Title)
 {
@@ -610,7 +610,7 @@ void not_dl(struct deadline** List, char* Title)
     }
     //Skip deadline to delete it
     current->ok=0;
-    printf("%s is finished!", Title);
+    printf("%s is now incomplete!", Title);
 }
 void edit_dl(struct deadline** List, char* Title)
 {
