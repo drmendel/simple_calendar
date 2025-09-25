@@ -10,31 +10,28 @@ Additionally, it includes a countdown feature based on the current time to keep 
 
 <br>
 
-## How to install Simple Calendar on Windows:
+## Install on Windows:
 
 1. Create a local repository and give it a name, such as SimpleCalendar.
 2. Download the executable file (SimpleCalendar.exe) to the SimpleCalendar directory.
 3. Try to run SimpleCalendar.exe file.
-4. Windows Defender may try to shut it down. If this happens, allow the executable file to run on your machine.
+4. Windows Defender may try to shut it down. Proceed only if you do not have any concerns.
+
+Compile from source using [MinGW GCC](https://sourceforge.net/projects/gcc-win64/) in Windows PowerShell
+
+```c
+    gcc --version                                           // check if gcc is available
+    '1 ICON "icon.ico"' | Out-File -Encoding ASCII icon.rc  // create a resource script 'icon.rc'
+    windres icon.rc -O coff -o icon.o                       // make a gcc compatable object file for icon
+    gcc main.c functions.c -i icon.o -o SimpleCalendar.exe  // make sure that you are not compiling a virus
+    .\SimpleCalendar.exe                                    // run the program from terminal the or with the GUI
+```
 
 <br>
 
-## How to install Simple Calendar on Linux:
+## Linux & Mac
 
-### Easy method
-1. Clone the repository to your machine.
-2. Compile the source code with GCC.
-3. Run the program.
-
-You can use the following commands in the terminal:
-
-```c
-    sudo apt update                                       // make your system up to date
-    sudo apt install gcc                                  // probaly understandable
-    gcc --version                                         // check if gcc is available
-    gcc main.c functions.c -i icon.o -o SimpleCalendar    // make sure that you are not compiling a virus
-    .\SimpleCalendar                                      // run the program and enjoy your life
-```
+Unfortunately, this version is not compatible with Linux or macOS.
 
 <br>
 
