@@ -22,12 +22,6 @@ Additionally, it includes a countdown feature based on the current time to keep 
 ## How to install Simple Calendar on Linux:
 
 ### Easy method
-1. Create a local repository and give it a name, such as SimpleCalendar.
-2. Download the executable file (SimpleCalendar.exe) to the SimpleCalendar directory.
-3. Try to run the executable file.
-4. If needed, allow the executable file to run on your machine.
-
-### Alternative method
 1. Clone the repository to your machine.
 2. Compile the source code with GCC.
 3. Run the program.
