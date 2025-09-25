@@ -19,14 +19,22 @@ Additionally, it includes a countdown feature based on the current time to keep 
 
 Compile from source using [MinGW GCC](https://sourceforge.net/projects/gcc-win64/) in Windows PowerShell
 
-```c
-    gcc --version                                           // check if gcc is available
-    '1 ICON "icon.ico"' | Out-File -Encoding ASCII icon.rc  // create a resource script 'icon.rc'
-    windres icon.rc -O coff -o icon.o                       // make a gcc compatable object file for icon
-    gcc main.c functions.c -i icon.o -o SimpleCalendar.exe  // make sure that you are not compiling a virus
-    .\SimpleCalendar.exe                                    // run the program from terminal the or with the GUI
-```
+```powershell
+# Check if GCC is installed
+gcc --version
 
+# Create a resource script 'icon.rc' for the icon
+'1 ICON "icon.ico"' | Out-File -Encoding ASCII icon.rc
+
+# Compile the resource script into a GCC-compatible object file
+windres icon.rc -O coff -o icon.o
+
+# Compile the program and link the icon object
+gcc main.c functions.c icon.o -o SimpleCalendar.exe
+
+# Run the program
+start SimpleCalendar.exe
+```
 <br>
 
 ## Linux & Mac
