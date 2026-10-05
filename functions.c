@@ -162,6 +162,7 @@ void free_str(stringList** buffer)
 #define COL_DATE  17
 #define COL_CDOWN 22
 #define COL_TEXT  25
+#define COL_BUF  128
 
 static const char* SECTION_NAMES[] = {
     "ALREADY LATE", "IN A DAY", "IN A WEEK", "IN A MONTH", "IN A LIFE"
@@ -176,18 +177,43 @@ static int get_section(time_t rem)
     return 4;
 }
 
+static int utf8_width(const char* s)
+{
+    int w = 0;
+    for (; *s; s++)
+        if ((*s & 0xC0) != 0x80) w++;
+    return w;
+}
+
 static void trunc_field(char* dst, const char* src, int width)
 {
-    int len = (int)strlen(src);
-    if (len <= width)
-        sprintf(dst, "%-*s", width, src);
+    int disp_w  = utf8_width(src);
+    int byte_len = (int)strlen(src);
+
+    if (disp_w <= width)
+    {
+        memcpy(dst, src, byte_len);
+        int pad = width - disp_w;
+        memset(dst + byte_len, ' ', pad);
+        dst[byte_len + pad] = '\0';
+    }
     else
     {
-        memcpy(dst, src, width - 3);
-        dst[width - 3] = '.';
-        dst[width - 2] = '.';
-        dst[width - 1] = '.';
-        dst[width]     = '\0';
+        int cols = 0, i = 0;
+        while (src[i] && cols < width - 3)
+        {
+            if ((src[i] & 0xC0) != 0x80)
+            {
+                if (cols == width - 3) break;
+                cols++;
+            }
+            i++;
+        }
+        memcpy(dst, src, i);
+        dst[i]     = '.';
+        dst[i + 1] = '.';
+        dst[i + 2] = '.';
+        dst[i + 3] = '\0';
     }
 }
 
@@ -407,7 +433,7 @@ void print_tm_time(struct tm* time, unsigned int is_sec)
 void print_dl(struct deadline* dl, int all)
 {
     struct tm* t = gmtime(&dl->time);
-    char title[COL_TEXT + 1], place[COL_TEXT + 1], note[COL_TEXT + 1];
+    char title[COL_BUF], place[COL_BUF], note[COL_BUF];
     trunc_field(title, dl->title, COL_TEXT);
     trunc_field(place, dl->place, COL_TEXT);
     trunc_field(note, dl->note, COL_TEXT);
@@ -440,12 +466,12 @@ void str_cd_dl(struct deadline* dl, int all, stringList** buffer)
     char cd[COL_CDOWN + 1];
     fmt_cd_time(dl->time - now - 3600, cd);
 
-    char title[COL_TEXT + 1], place[COL_TEXT + 1], note[COL_TEXT + 1];
+    char title[COL_BUF], place[COL_BUF], note[COL_BUF];
     trunc_field(title, dl->title, COL_TEXT);
     trunc_field(place, dl->place, COL_TEXT);
     trunc_field(note, dl->note, COL_TEXT);
 
-    char row[256];
+    char row[512];
     if (all)
         snprintf(row, sizeof(row), "│ %-*s │ %s │ %s │ %s │ %s │\n",
                  COL_STAT, dl->ok ? "OK" : "X", cd, title, place, note);
