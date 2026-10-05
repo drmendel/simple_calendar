@@ -163,6 +163,19 @@ void free_str(stringList** buffer)
 #define COL_CDOWN 22
 #define COL_TEXT  25
 
+static const char* SECTION_NAMES[] = {
+    "ALREADY LATE", "IN A DAY", "IN A WEEK", "IN A MONTH", "IN A LIFE"
+};
+
+static int get_section(time_t rem)
+{
+    if (rem <= 0)              return 0;
+    if (rem <= 24 * 3600)      return 1;
+    if (rem <= 7 * 24 * 3600)  return 2;
+    if (rem <= 31 * 24 * 3600) return 3;
+    return 4;
+}
+
 static void trunc_field(char* dst, const char* src, int width)
 {
     int len = (int)strlen(src);
@@ -187,91 +200,112 @@ static int table_width(int all, int date_w)
     return w;
 }
 
-static void print_sep(int all, int date_w)
+static void print_border(int all, int date_w,
+                          const char* l, const char* h,
+                          const char* c, const char* r)
 {
-    int i;
-    putchar('+');
+    int widths[5], ncols;
     if (all)
     {
-        for (i = 0; i < COL_STAT + 2; i++) putchar('-');
-        putchar('+');
+        widths[0] = COL_STAT; widths[1] = date_w;
+        widths[2] = COL_TEXT; widths[3] = COL_TEXT; widths[4] = COL_TEXT;
+        ncols = 5;
     }
-    for (i = 0; i < date_w + 2; i++) putchar('-');
-    putchar('+');
-    for (int j = 0; j < 3; j++)
+    else
     {
-        for (i = 0; i < COL_TEXT + 2; i++) putchar('-');
-        putchar('+');
+        widths[0] = date_w;
+        widths[1] = COL_TEXT; widths[2] = COL_TEXT; widths[3] = COL_TEXT;
+        ncols = 4;
     }
-    putchar('\n');
+    printf("%s", l);
+    for (int col = 0; col < ncols; col++)
+    {
+        for (int i = 0; i < widths[col] + 2; i++) printf("%s", h);
+        printf("%s", col < ncols - 1 ? c : r);
+    }
+    printf("\n");
 }
 
-static void print_hdr(int all, int date_w, const char* label)
+static void print_hdr_row(int all, int date_w, const char* label)
 {
-    print_sep(all, date_w);
-    if (all) printf("| %-*s ", COL_STAT, "Stat");
-    printf("| %-*s | %-*s | %-*s | %-*s |\n",
+    if (all) printf("│ %-*s ", COL_STAT, "Stat");
+    printf("│ %-*s │ %-*s │ %-*s │ %-*s │\n",
            date_w, label, COL_TEXT, "Title", COL_TEXT, "Place", COL_TEXT, "Note");
-    print_sep(all, date_w);
 }
 
-static void print_section_row(int all, int date_w, const char* label)
+static void print_section_title(const char* name, int all, int date_w)
 {
-    int inner = table_width(all, date_w) - 4;
-    printf("| %-*s |\n", inner, label);
+    int tw       = table_width(all, date_w);
+    int name_len = (int)strlen(name);
+    int fill     = tw - name_len - 5;
+    if (fill < 3) fill = 3;
+
+    printf("\n ━━ %s ", name);
+    for (int i = 0; i < fill; i++) printf("━");
+    printf("\n");
 }
 
-static void str_sep(stringList** buf, int all, int date_w)
+static void str_border(stringList** buf, int all, int date_w,
+                        const char* l, const char* h,
+                        const char* c, const char* r)
 {
-    int tw  = table_width(all, date_w);
-    char* s = (char*)malloc(tw + 2);
-    int p   = 0;
-    int i;
-
-    s[p++] = '+';
+    int widths[5], ncols;
     if (all)
     {
-        memset(s + p, '-', COL_STAT + 2);
-        p += COL_STAT + 2;
-        s[p++] = '+';
+        widths[0] = COL_STAT; widths[1] = date_w;
+        widths[2] = COL_TEXT; widths[3] = COL_TEXT; widths[4] = COL_TEXT;
+        ncols = 5;
     }
-    memset(s + p, '-', date_w + 2);
-    p += date_w + 2;
-    s[p++] = '+';
-    for (i = 0; i < 3; i++)
+    else
     {
-        memset(s + p, '-', COL_TEXT + 2);
-        p += COL_TEXT + 2;
-        s[p++] = '+';
+        widths[0] = date_w;
+        widths[1] = COL_TEXT; widths[2] = COL_TEXT; widths[3] = COL_TEXT;
+        ncols = 4;
     }
-    s[p++] = '\n';
-    s[p]   = '\0';
+    int bufsize = table_width(all, date_w) * 4 + 8;
+    char* s     = (char*)malloc(bufsize);
+    s[0]        = '\0';
+    strcat(s, l);
+    for (int col = 0; col < ncols; col++)
+    {
+        for (int i = 0; i < widths[col] + 2; i++) strcat(s, h);
+        strcat(s, col < ncols - 1 ? c : r);
+    }
+    strcat(s, "\n");
     new_str(buf, s);
     free(s);
 }
 
-static void str_hdr(stringList** buf, int all, int date_w, const char* label)
+static void str_hdr_row(stringList** buf, int all, int date_w, const char* label)
 {
     char row[256];
-    str_sep(buf, all, date_w);
     if (all)
-        snprintf(row, sizeof(row), "| %-*s | %-*s | %-*s | %-*s | %-*s |\n",
+        snprintf(row, sizeof(row), "│ %-*s │ %-*s │ %-*s │ %-*s │ %-*s │\n",
                  COL_STAT, "Stat", date_w, label,
                  COL_TEXT, "Title", COL_TEXT, "Place", COL_TEXT, "Note");
     else
-        snprintf(row, sizeof(row), "| %-*s | %-*s | %-*s | %-*s |\n",
+        snprintf(row, sizeof(row), "│ %-*s │ %-*s │ %-*s │ %-*s │\n",
                  date_w, label, COL_TEXT, "Title", COL_TEXT, "Place", COL_TEXT, "Note");
     new_str(buf, row);
-    str_sep(buf, all, date_w);
 }
 
-static void str_section_row(stringList** buf, int all, int date_w, const char* label)
+static void str_section_title(stringList** buf, const char* name, int all, int date_w)
 {
-    int inner = table_width(all, date_w) - 4;
-    char* row = (char*)malloc(inner + 8);
-    snprintf(row, inner + 8, "| %-*s |\n", inner, label);
-    new_str(buf, row);
-    free(row);
+    int tw       = table_width(all, date_w);
+    int name_len = (int)strlen(name);
+    int fill     = tw - name_len - 5;
+    if (fill < 3) fill = 3;
+
+    int bufsize = tw * 4 + 16;
+    char* s     = (char*)malloc(bufsize);
+    s[0]        = '\0';
+    strcat(s, "\n ━━ ");
+    strcat(s, name);
+    strcat(s, " ");
+    for (int i = 0; i < fill; i++) strcat(s, "━");
+    strcat(s, "\n");
+    new_str(buf, s);
+    free(s);
 }
 
 static void fmt_cd_time(time_t rem, char* out)
@@ -379,21 +413,23 @@ void print_dl(struct deadline* dl, int all)
     trunc_field(note, dl->note, COL_TEXT);
 
     if (all)
-        printf("| %-*s | %04d.%02d.%02d. %02d:%02d | %s | %s | %s |\n",
+        printf("│ %-*s │ %04d.%02d.%02d. %02d:%02d │ %s │ %s │ %s │\n",
                COL_STAT, dl->ok ? "OK" : "X",
                t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
                t->tm_hour, t->tm_min, title, place, note);
     else
-        printf("| %04d.%02d.%02d. %02d:%02d | %s | %s | %s |\n",
+        printf("│ %04d.%02d.%02d. %02d:%02d │ %s │ %s │ %s │\n",
                t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
                t->tm_hour, t->tm_min, title, place, note);
 }
 
 void print_dl_table(struct deadline* dl, int all)
 {
-    print_hdr(all, COL_DATE, "Date");
+    print_border(all, COL_DATE, "┌", "─", "┬", "┐");
+    print_hdr_row(all, COL_DATE, "Date");
+    print_border(all, COL_DATE, "├", "─", "┼", "┤");
     print_dl(dl, all);
-    print_sep(all, COL_DATE);
+    print_border(all, COL_DATE, "└", "─", "┴", "┘");
 }
 
 void str_cd_dl(struct deadline* dl, int all, stringList** buffer)
@@ -409,12 +445,12 @@ void str_cd_dl(struct deadline* dl, int all, stringList** buffer)
     trunc_field(place, dl->place, COL_TEXT);
     trunc_field(note, dl->note, COL_TEXT);
 
-    char row[200];
+    char row[256];
     if (all)
-        snprintf(row, sizeof(row), "| %-*s | %s | %s | %s | %s |\n",
+        snprintf(row, sizeof(row), "│ %-*s │ %s │ %s │ %s │ %s │\n",
                  COL_STAT, dl->ok ? "OK" : "X", cd, title, place, note);
     else
-        snprintf(row, sizeof(row), "| %s | %s | %s | %s |\n",
+        snprintf(row, sizeof(row), "│ %s │ %s │ %s │ %s │\n",
                  cd, title, place, note);
     new_str(buffer, row);
 }
@@ -423,102 +459,64 @@ void print_list(struct deadline* List, int all)
 {
     time_t now;
     time(&now);
-    byte late = 1, inDay = 1, inWeek = 1, inMonth = 1, inLife = 1;
-    time_t rem;
-    int has_header = 0;
+    int cur_sec  = -1;
+    int in_table = 0;
 
     while (List != NULL)
     {
-        rem = List->time - now - 3600;
+        time_t rem = List->time - now - 3600;
         if (all || !List->ok)
         {
-            if (!has_header)
+            int sec = get_section(rem);
+            if (sec != cur_sec)
             {
-                print_hdr(all, COL_DATE, "Date");
-                has_header = 1;
-            }
-            if (rem <= 0 && late)
-            {
-                print_section_row(all, COL_DATE, "ALREADY LATE");
-                late = 0;
-            }
-            if (0 < rem && inDay)
-            {
-                print_section_row(all, COL_DATE, "IN A DAY");
-                inDay = 0;
-            }
-            if (24 * 3600 < rem && inWeek)
-            {
-                print_section_row(all, COL_DATE, "IN A WEEK");
-                inWeek = 0;
-            }
-            if (7 * 24 * 3600 < rem && inMonth)
-            {
-                print_section_row(all, COL_DATE, "IN A MONTH");
-                inMonth = 0;
-            }
-            if (31 * 24 * 3600 < rem && inLife)
-            {
-                print_section_row(all, COL_DATE, "IN A LIFE");
-                inLife = 0;
+                if (in_table)
+                    print_border(all, COL_DATE, "└", "─", "┴", "┘");
+                print_section_title(SECTION_NAMES[sec], all, COL_DATE);
+                print_border(all, COL_DATE, "┌", "─", "┬", "┐");
+                print_hdr_row(all, COL_DATE, "Date");
+                print_border(all, COL_DATE, "├", "─", "┼", "┤");
+                cur_sec  = sec;
+                in_table = 1;
             }
             print_dl(List, all);
         }
         List = List->next;
     }
-    if (has_header)
-        print_sep(all, COL_DATE);
+    if (in_table)
+        print_border(all, COL_DATE, "└", "─", "┴", "┘");
 }
 
 void str_cd_list(struct deadline* List, int all, stringList** buffer)
 {
     time_t now;
     time(&now);
-    byte late = 1, inDay = 1, inWeek = 1, inMonth = 1, inLife = 1;
-    time_t rem;
-    int has_header = 0;
+    int cur_sec  = -1;
+    int in_table = 0;
 
     while (List != NULL)
     {
-        rem = List->time - now - 3600;
+        time_t rem = List->time - now - 3600;
         if (all || !List->ok)
         {
-            if (!has_header)
+            int sec = get_section(rem);
+            if (sec != cur_sec)
             {
-                str_hdr(buffer, all, COL_CDOWN, "Remaining");
-                has_header = 1;
-            }
-            if (rem <= 0 && late)
-            {
-                str_section_row(buffer, all, COL_CDOWN, "ALREADY LATE");
-                late = 0;
-            }
-            if (0 < rem && inDay)
-            {
-                str_section_row(buffer, all, COL_CDOWN, "IN A DAY");
-                inDay = 0;
-            }
-            if (24 * 3600 < rem && inWeek)
-            {
-                str_section_row(buffer, all, COL_CDOWN, "IN A WEEK");
-                inWeek = 0;
-            }
-            if (7 * 24 * 3600 < rem && inMonth)
-            {
-                str_section_row(buffer, all, COL_CDOWN, "IN A MONTH");
-                inMonth = 0;
-            }
-            if (31 * 24 * 3600 < rem && inLife)
-            {
-                str_section_row(buffer, all, COL_CDOWN, "IN A LIFE");
-                inLife = 0;
+                if (in_table)
+                    str_border(buffer, all, COL_CDOWN, "└", "─", "┴", "┘");
+                str_section_title(buffer, SECTION_NAMES[sec], all, COL_CDOWN);
+                str_border(buffer, all, COL_CDOWN, "┌", "─", "┬", "┐");
+                str_hdr_row(buffer, all, COL_CDOWN, "Remaining");
+                str_border(buffer, all, COL_CDOWN, "├", "─", "┼", "┤");
+                cur_sec  = sec;
+                in_table = 1;
             }
             str_cd_dl(List, all, buffer);
         }
         List = List->next;
     }
-    if (has_header)
-        str_sep(buffer, all, COL_CDOWN);
+    if (in_table)
+        str_border(buffer, all, COL_CDOWN, "└", "─", "┴", "┘");
 }
 
 struct deadline* new_dl(struct deadline* List)
