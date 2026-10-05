@@ -33,10 +33,7 @@ void goto_xy(int x, int y)
 
 void cursor(int on)
 {
-    if (on)
-        printf("\x1b[?25h");
-    else
-        printf("\x1b[?25l");
+    printf(on ? "\x1b[?25h" : "\x1b[?25l");
     fflush(stdout);
 }
 
@@ -88,66 +85,50 @@ int sc_getch(void)
 
 #endif
 
-// ==================== STRING LIST ====================
+/* ── String list ────────────────────────────────────────────── */
 
 void new_str(stringList** buffer, char* input)
 {
-    stringList* head  = (*buffer);
-    unsigned int size = strlen(input) + 1;
+    unsigned int size  = strlen(input) + 1;
+    stringList* node   = (stringList*)malloc(sizeof(stringList));
+    node->next         = NULL;
+    node->string       = (char*)malloc(sizeof(char) * size);
+    memcpy(node->string, input, size);
 
-    if ((*buffer) == NULL)
+    if (*buffer == NULL)
     {
-        (*buffer)         = (stringList*)malloc(sizeof(stringList));
-        (*buffer)->next   = NULL;
-        (*buffer)->string = (char*)malloc(sizeof(char) * size);
-        memset((*buffer)->string, 0, size);
-        memcpy((*buffer)->string, input, size);
+        *buffer = node;
+        return;
     }
-    else
-    {
-        while (head->next != NULL)
-            head = head->next;
-        head->next         = (stringList*)malloc(sizeof(stringList));
-        head->next->next   = NULL;
-        head->next->string = (char*)malloc(sizeof(char) * size);
-        memset(head->next->string, 0, size);
-        memcpy(head->next->string, input, size);
-    }
-}
-
-int calc_str_list_len(stringList* list)
-{
-    int length = 0;
-    while (list != NULL)
-    {
-        if (list->string != NULL)
-            for (int i = 0; list->string[i] != '\0'; i++)
-                length++;
-        list = list->next;
-    }
-    return length;
+    stringList* tail = *buffer;
+    while (tail->next != NULL)
+        tail = tail->next;
+    tail->next = node;
 }
 
 void print_str(stringList* buffer)
 {
-    unsigned int size = calc_str_list_len(buffer);
-    char* big_buffer  = (char*)malloc(sizeof(char) * (size + 1));
-    memset(big_buffer, 0, size + 1);
+    int total = 0;
+    for (stringList* p = buffer; p; p = p->next)
+        total += strlen(p->string);
+
+    char* out = (char*)malloc(total + 1);
+    out[0]    = '\0';
     while (buffer != NULL)
     {
-        strcat(big_buffer, buffer->string);
+        strcat(out, buffer->string);
         buffer = buffer->next;
     }
     goto_xy(0, 0);
-    printf("%s", big_buffer);
+    printf("%s\x1b[J", out);
     fflush(stdout);
-    free(big_buffer);
+    free(out);
 }
 
 void free_str(stringList** buffer)
 {
     stringList* tmp;
-    while ((*buffer) != NULL)
+    while (*buffer != NULL)
     {
         tmp = (*buffer)->next;
         free((*buffer)->string);
@@ -156,7 +137,7 @@ void free_str(stringList** buffer)
     }
 }
 
-// ==================== TABLE FORMATTING ====================
+/* ── Table formatting ───────────────────────────────────────── */
 
 #define COL_STAT   4
 #define COL_DATE  17
@@ -166,6 +147,10 @@ void free_str(stringList** buffer)
 
 static const char* SECTION_NAMES[] = {
     "ALREADY LATE", "IN A DAY", "IN A WEEK", "IN A MONTH", "IN A LIFE"
+};
+
+static const char* SECTION_COLORS[] = {
+    CLR_RED, CLR_YEL, CLR_GRN, CLR_CYN, CLR_BLU
 };
 
 static int get_section(time_t rem)
@@ -187,7 +172,7 @@ static int utf8_width(const char* s)
 
 static void trunc_field(char* dst, const char* src, int width)
 {
-    int disp_w  = utf8_width(src);
+    int disp_w   = utf8_width(src);
     int byte_len = (int)strlen(src);
 
     if (disp_w <= width)
@@ -254,20 +239,28 @@ static void print_border(int all, int date_w,
 
 static void print_hdr_row(int all, int date_w, const char* label)
 {
-    if (all) printf("│ %-*s ", COL_STAT, "Stat");
-    printf("│ %-*s │ %-*s │ %-*s │ %-*s │\n",
+    if (all)
+        printf("│ " CLR_DIM "%-*s" CLR_RESET " ", COL_STAT, "Stat");
+    printf("│ " CLR_DIM "%-*s" CLR_RESET
+           " │ " CLR_DIM "%-*s" CLR_RESET
+           " │ " CLR_DIM "%-*s" CLR_RESET
+           " │ " CLR_DIM "%-*s" CLR_RESET " │\n",
            date_w, label, COL_TEXT, "Title", COL_TEXT, "Place", COL_TEXT, "Note");
 }
 
-static void print_section_title(const char* name)
+static void print_section_title(int sec)
 {
-    printf("\n %s\n", name);
+    printf("\n %s%s%s\n", SECTION_COLORS[sec], SECTION_NAMES[sec], CLR_RESET);
 }
 
 static void str_border(stringList** buf, int all, int date_w,
                         const char* l, const char* h,
                         const char* c, const char* r)
 {
+    int bufsize = table_width(all, date_w) * 4 + 8;
+    char* s     = (char*)malloc(bufsize);
+    s[0]        = '\0';
+
     int widths[5], ncols;
     if (all)
     {
@@ -281,9 +274,6 @@ static void str_border(stringList** buf, int all, int date_w,
         widths[1] = COL_TEXT; widths[2] = COL_TEXT; widths[3] = COL_TEXT;
         ncols = 4;
     }
-    int bufsize = table_width(all, date_w) * 4 + 8;
-    char* s     = (char*)malloc(bufsize);
-    s[0]        = '\0';
     strcat(s, l);
     for (int col = 0; col < ncols; col++)
     {
@@ -297,47 +287,57 @@ static void str_border(stringList** buf, int all, int date_w,
 
 static void str_hdr_row(stringList** buf, int all, int date_w, const char* label)
 {
-    char row[256];
+    char row[512];
     if (all)
-        snprintf(row, sizeof(row), "│ %-*s │ %-*s │ %-*s │ %-*s │ %-*s │\n",
+        snprintf(row, sizeof(row),
+                 "│ " CLR_DIM "%-*s" CLR_RESET
+                 " │ " CLR_DIM "%-*s" CLR_RESET
+                 " │ " CLR_DIM "%-*s" CLR_RESET
+                 " │ " CLR_DIM "%-*s" CLR_RESET
+                 " │ " CLR_DIM "%-*s" CLR_RESET " │\n",
                  COL_STAT, "Stat", date_w, label,
                  COL_TEXT, "Title", COL_TEXT, "Place", COL_TEXT, "Note");
     else
-        snprintf(row, sizeof(row), "│ %-*s │ %-*s │ %-*s │ %-*s │\n",
+        snprintf(row, sizeof(row),
+                 "│ " CLR_DIM "%-*s" CLR_RESET
+                 " │ " CLR_DIM "%-*s" CLR_RESET
+                 " │ " CLR_DIM "%-*s" CLR_RESET
+                 " │ " CLR_DIM "%-*s" CLR_RESET " │\n",
                  date_w, label, COL_TEXT, "Title", COL_TEXT, "Place", COL_TEXT, "Note");
     new_str(buf, row);
 }
 
-static void str_section_title(stringList** buf, const char* name)
+static void str_section_title(stringList** buf, int sec)
 {
-    int len = (int)strlen(name) + 4;
-    char* s = (char*)malloc(len);
-    sprintf(s, "\n %s\n", name);
+    char s[64];
+    sprintf(s, "\n %s%s%s\n", SECTION_COLORS[sec], SECTION_NAMES[sec], CLR_RESET);
     new_str(buf, s);
-    free(s);
 }
 
 static void fmt_cd_time(time_t rem, char* out)
 {
     time_t a = rem < 0 ? -rem : rem;
-    int y    = a / (365 * 24 * 3600);
-    a       %= (365 * 24 * 3600);
-    int mo   = a / (30 * 24 * 3600);
-    a       %= (30 * 24 * 3600);
-    int d    = a / (24 * 3600);
+    int d    = (int)(a / (24 * 3600));
     a       %= (24 * 3600);
-    int h    = a / 3600;
+    int h    = (int)(a / 3600);
     a       %= 3600;
-    int mi   = a / 60;
-    int s    = a % 60;
+    int m    = (int)(a / 60);
+    int s    = (int)(a % 60);
 
-    sprintf(out, "%c %04d.%02d.%02d. %02d:%02d:%02d",
-            rem < 0 ? '-' : ' ', y, mo, d, h, mi, s);
+    char tmp[64];
+    if (d > 365)
+        sprintf(tmp, "%dy %dd %02d:%02d:%02d", d / 365, d % 365, h, m, s);
+    else if (d > 0)
+        sprintf(tmp, "%dd %02d:%02d:%02d", d, h, m, s);
+    else
+        sprintf(tmp, "%02d:%02d:%02d", h, m, s);
+
+    sprintf(out, "%c%*s", rem < 0 ? '-' : ' ', COL_CDOWN - 1, tmp);
 }
 
-// ==================== DEADLINE HELPERS ====================
+/* ── Deadline helpers ───────────────────────────────────────── */
 
-int same_title(deadline* List, char* Title)
+static int same_title(deadline* List, char* Title)
 {
     while (List != NULL)
     {
@@ -347,7 +347,7 @@ int same_title(deadline* List, char* Title)
     return 0;
 }
 
-char* read_line()
+char* read_line(void)
 {
     size_t bufferSize = STR_SIZE;
     size_t length     = 0;
@@ -389,7 +389,7 @@ char* read_line()
     return ret_input;
 }
 
-long read_int()
+long read_int(void)
 {
     char* str = read_line();
     char* endptr;
@@ -403,17 +403,7 @@ long read_int()
     return -1;
 }
 
-void print_tm_time(struct tm* time, unsigned int is_sec)
-{
-    if (is_sec)
-        printf("%04d.%02d.%02d. %02d:%02d:%02d", time->tm_year + 1900, time->tm_mon + 1, time->tm_mday, time->tm_hour,
-               time->tm_min, time->tm_sec);
-    else
-        printf("%04d.%02d.%02d. %02d:%02d", time->tm_year + 1900, time->tm_mon + 1, time->tm_mday, time->tm_hour,
-               time->tm_min);
-}
-
-void print_dl(struct deadline* dl, int all)
+static void print_dl(struct deadline* dl, int all)
 {
     struct tm* t = gmtime(&dl->time);
     char title[COL_BUF], place[COL_BUF], note[COL_BUF];
@@ -422,8 +412,10 @@ void print_dl(struct deadline* dl, int all)
     trunc_field(note, dl->note, COL_TEXT);
 
     if (all)
-        printf("│ %-*s │ %04d.%02d.%02d. %02d:%02d │ %s │ %s │ %s │\n",
+        printf("│ %s%-*s%s │ %04d.%02d.%02d. %02d:%02d │ %s │ %s │ %s │\n",
+               dl->ok ? CLR_GRN : CLR_RED,
                COL_STAT, dl->ok ? "OK" : "X",
+               CLR_RESET,
                t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
                t->tm_hour, t->tm_min, title, place, note);
     else
@@ -441,13 +433,11 @@ void print_dl_table(struct deadline* dl, int all)
     print_border(all, COL_DATE, "└", "─", "┴", "┘");
 }
 
-void str_cd_dl(struct deadline* dl, int all, stringList** buffer)
+static void str_cd_dl(struct deadline* dl, int all, time_t now, stringList** buffer)
 {
-    time_t now;
-    time(&now);
-
     char cd[COL_CDOWN + 1];
-    fmt_cd_time(dl->time - now - 3600, cd);
+    time_t rem = dl->time - now - 3600;
+    fmt_cd_time(rem, cd);
 
     char title[COL_BUF], place[COL_BUF], note[COL_BUF];
     trunc_field(title, dl->title, COL_TEXT);
@@ -456,11 +446,18 @@ void str_cd_dl(struct deadline* dl, int all, stringList** buffer)
 
     char row[512];
     if (all)
-        snprintf(row, sizeof(row), "│ %-*s │ %s │ %s │ %s │ %s │\n",
-                 COL_STAT, dl->ok ? "OK" : "X", cd, title, place, note);
+        snprintf(row, sizeof(row),
+                 "│ %s%-*s%s │ %s%s%s │ %s │ %s │ %s │\n",
+                 dl->ok ? CLR_GRN : CLR_RED,
+                 COL_STAT, dl->ok ? "OK" : "X",
+                 CLR_RESET,
+                 rem < 0 ? CLR_RED : "", cd, rem < 0 ? CLR_RESET : "",
+                 title, place, note);
     else
-        snprintf(row, sizeof(row), "│ %s │ %s │ %s │ %s │\n",
-                 cd, title, place, note);
+        snprintf(row, sizeof(row),
+                 "│ %s%s%s │ %s │ %s │ %s │\n",
+                 rem < 0 ? CLR_RED : "", cd, rem < 0 ? CLR_RESET : "",
+                 title, place, note);
     new_str(buffer, row);
 }
 
@@ -481,7 +478,7 @@ void print_list(struct deadline* List, int all)
             {
                 if (in_table)
                     print_border(all, COL_DATE, "└", "─", "┴", "┘");
-                print_section_title(SECTION_NAMES[sec]);
+                print_section_title(sec);
                 print_border(all, COL_DATE, "┌", "─", "┬", "┐");
                 print_hdr_row(all, COL_DATE, "Date");
                 print_border(all, COL_DATE, "├", "─", "┼", "┤");
@@ -513,14 +510,14 @@ void str_cd_list(struct deadline* List, int all, stringList** buffer)
             {
                 if (in_table)
                     str_border(buffer, all, COL_CDOWN, "└", "─", "┴", "┘");
-                str_section_title(buffer, SECTION_NAMES[sec]);
+                str_section_title(buffer, sec);
                 str_border(buffer, all, COL_CDOWN, "┌", "─", "┬", "┐");
                 str_hdr_row(buffer, all, COL_CDOWN, "Remaining");
                 str_border(buffer, all, COL_CDOWN, "├", "─", "┼", "┤");
                 cur_sec  = sec;
                 in_table = 1;
             }
-            str_cd_dl(List, all, buffer);
+            str_cd_dl(List, all, now, buffer);
         }
         List = List->next;
     }
@@ -749,7 +746,7 @@ void edit_dl(struct deadline** List, char* Title)
     print_dl_table(current, 0);
 }
 
-struct deadline* merge(struct deadline* list1, struct deadline* list2)
+static struct deadline* merge(struct deadline* list1, struct deadline* list2)
 {
     if (!list1) return list2;
     if (!list2) return list1;
