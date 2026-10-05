@@ -1,7 +1,5 @@
 #include "functions.h"
 
-// ==================== PLATFORM-SPECIFIC IMPLEMENTATIONS ====================
-
 #ifdef _WIN32
 
 void goto_xy(int x, int y)
@@ -25,9 +23,8 @@ void sc_clear(void) { system("cls"); }
 
 void sleep_ms(unsigned int ms) { Sleep(ms); }
 
-#else /* Linux / macOS */
+#else
 
-/* Move cursor to (x,y) using ANSI escape codes — no ncurses needed */
 void goto_xy(int x, int y)
 {
     printf("\x1b[%d;%dH", y + 1, x + 1);
@@ -37,9 +34,9 @@ void goto_xy(int x, int y)
 void cursor(int on)
 {
     if (on)
-        printf("\x1b[?25h"); /* show cursor */
+        printf("\x1b[?25h");
     else
-        printf("\x1b[?25l"); /* hide cursor */
+        printf("\x1b[?25l");
     fflush(stdout);
 }
 
@@ -47,7 +44,6 @@ void sc_clear(void) { system("clear"); }
 
 void sleep_ms(unsigned int ms) { usleep((useconds_t)ms * 1000); }
 
-/* Non-blocking kbhit() for POSIX terminals */
 int kbhit(void)
 {
     struct termios oldt, newt;
@@ -74,7 +70,6 @@ int kbhit(void)
     return 0;
 }
 
-/* Single-char read without echo for POSIX */
 int sc_getch(void)
 {
     struct termios oldt, newt;
@@ -91,7 +86,7 @@ int sc_getch(void)
     return ch;
 }
 
-#endif /* _WIN32 */
+#endif
 
 // ==================== STRING LIST ====================
 
@@ -159,6 +154,142 @@ void free_str(stringList** buffer)
         free(*buffer);
         *buffer = tmp;
     }
+}
+
+// ==================== TABLE FORMATTING ====================
+
+#define COL_STAT   4
+#define COL_DATE  17
+#define COL_CDOWN 22
+#define COL_TEXT  25
+
+static void trunc_field(char* dst, const char* src, int width)
+{
+    int len = (int)strlen(src);
+    if (len <= width)
+        sprintf(dst, "%-*s", width, src);
+    else
+    {
+        memcpy(dst, src, width - 3);
+        dst[width - 3] = '.';
+        dst[width - 2] = '.';
+        dst[width - 1] = '.';
+        dst[width]     = '\0';
+    }
+}
+
+static int table_width(int all, int date_w)
+{
+    int w = 1;
+    if (all) w += COL_STAT + 3;
+    w += date_w + 3;
+    w += (COL_TEXT + 3) * 3;
+    return w;
+}
+
+static void print_sep(int all, int date_w)
+{
+    int i;
+    putchar('+');
+    if (all)
+    {
+        for (i = 0; i < COL_STAT + 2; i++) putchar('-');
+        putchar('+');
+    }
+    for (i = 0; i < date_w + 2; i++) putchar('-');
+    putchar('+');
+    for (int j = 0; j < 3; j++)
+    {
+        for (i = 0; i < COL_TEXT + 2; i++) putchar('-');
+        putchar('+');
+    }
+    putchar('\n');
+}
+
+static void print_hdr(int all, int date_w, const char* label)
+{
+    print_sep(all, date_w);
+    if (all) printf("| %-*s ", COL_STAT, "Stat");
+    printf("| %-*s | %-*s | %-*s | %-*s |\n",
+           date_w, label, COL_TEXT, "Title", COL_TEXT, "Place", COL_TEXT, "Note");
+    print_sep(all, date_w);
+}
+
+static void print_section_row(int all, int date_w, const char* label)
+{
+    int inner = table_width(all, date_w) - 4;
+    printf("| %-*s |\n", inner, label);
+}
+
+static void str_sep(stringList** buf, int all, int date_w)
+{
+    int tw  = table_width(all, date_w);
+    char* s = (char*)malloc(tw + 2);
+    int p   = 0;
+    int i;
+
+    s[p++] = '+';
+    if (all)
+    {
+        memset(s + p, '-', COL_STAT + 2);
+        p += COL_STAT + 2;
+        s[p++] = '+';
+    }
+    memset(s + p, '-', date_w + 2);
+    p += date_w + 2;
+    s[p++] = '+';
+    for (i = 0; i < 3; i++)
+    {
+        memset(s + p, '-', COL_TEXT + 2);
+        p += COL_TEXT + 2;
+        s[p++] = '+';
+    }
+    s[p++] = '\n';
+    s[p]   = '\0';
+    new_str(buf, s);
+    free(s);
+}
+
+static void str_hdr(stringList** buf, int all, int date_w, const char* label)
+{
+    char row[256];
+    str_sep(buf, all, date_w);
+    if (all)
+        snprintf(row, sizeof(row), "| %-*s | %-*s | %-*s | %-*s | %-*s |\n",
+                 COL_STAT, "Stat", date_w, label,
+                 COL_TEXT, "Title", COL_TEXT, "Place", COL_TEXT, "Note");
+    else
+        snprintf(row, sizeof(row), "| %-*s | %-*s | %-*s | %-*s |\n",
+                 date_w, label, COL_TEXT, "Title", COL_TEXT, "Place", COL_TEXT, "Note");
+    new_str(buf, row);
+    str_sep(buf, all, date_w);
+}
+
+static void str_section_row(stringList** buf, int all, int date_w, const char* label)
+{
+    int inner = table_width(all, date_w) - 4;
+    char* row = (char*)malloc(inner + 8);
+    snprintf(row, inner + 8, "| %-*s |\n", inner, label);
+    new_str(buf, row);
+    free(row);
+}
+
+static void fmt_cd_time(time_t rem, char* out)
+{
+    time_t a = rem < 0 ? -rem : rem;
+    int y    = a / (365 * 24 * 3600);
+    a       %= (365 * 24 * 3600);
+    int mo   = a / (30 * 24 * 3600);
+    a       %= (30 * 24 * 3600);
+    int d    = a / (24 * 3600);
+    a       %= (24 * 3600);
+    int h    = a / 3600;
+    a       %= 3600;
+    int mi   = a / 60;
+    int s    = a % 60;
+
+    sprintf(out, "%c %04d.%02d.%02d. %02d:%02d:%02d",
+            rem < 0 ? '-' : ' ', y, mo, d, h, mi, s);
 }
 
 // ==================== DEADLINE HELPERS ====================
@@ -239,148 +370,155 @@ void print_tm_time(struct tm* time, unsigned int is_sec)
                time->tm_min);
 }
 
-void print_dl(struct deadline* DeadLine, int all)
+void print_dl(struct deadline* dl, int all)
 {
-    struct tm* time = gmtime(&DeadLine->time);
-    if (all)
-        printf(DeadLine->ok == 1 ? "\tOK\t" : "\t X\t");
-    else
-        printf("\t");
-    printf("%04d.%02d.%02d. %02d:%02d\t", time->tm_year + 1900, time->tm_mon + 1, time->tm_mday, time->tm_hour,
-           time->tm_min);
-    printf("%-15s\t%-15s\t%s", DeadLine->title, DeadLine->place, DeadLine->note);
-}
-
-void str_cd_time(time_t remTime, stringList** buffer)
-{
-    int remainingYears, remainingMonths, remainingDays, remainingHours, remainingMinutes, remainingSeconds;
-
-    remainingYears    = remTime / (365 * 24 * 60 * 60);
-    remTime          %= (365 * 24 * 60 * 60);
-    remainingMonths   = remTime / (30 * 24 * 60 * 60);
-    remTime          %= (30 * 24 * 60 * 60);
-    remainingDays     = remTime / (24 * 60 * 60);
-    remTime          %= (24 * 60 * 60);
-    remainingHours    = remTime / (60 * 60);
-    remTime          %= (60 * 60);
-    remainingMinutes  = remTime / 60;
-    remainingSeconds  = remTime % 60;
-
-    char* buf = (char*)malloc(100);
-    if (remTime < 0)
-        sprintf(buf, "- %04d.%02d.%02d. %02d:%02d:%02d", -remainingYears, -remainingMonths, -remainingDays,
-                -remainingHours, -remainingMinutes, -remainingSeconds);
-    else
-        sprintf(buf, "  %04d.%02d.%02d. %02d:%02d:%02d", remainingYears, remainingMonths, remainingDays, remainingHours,
-                remainingMinutes, remainingSeconds);
-    new_str(buffer, buf);
-    free(buf);
-}
-
-void str_cd_dl(struct deadline* DeadLine, int all, stringList** buffer)
-{
-    time_t currentTime;
-    time(&currentTime);
+    struct tm* t = gmtime(&dl->time);
+    char title[COL_TEXT + 1], place[COL_TEXT + 1], note[COL_TEXT + 1];
+    trunc_field(title, dl->title, COL_TEXT);
+    trunc_field(place, dl->place, COL_TEXT);
+    trunc_field(note, dl->note, COL_TEXT);
 
     if (all)
-        new_str(buffer, DeadLine->ok == 1 ? "\tOK\t" : "\t X\t");
+        printf("| %-*s | %04d.%02d.%02d. %02d:%02d | %s | %s | %s |\n",
+               COL_STAT, dl->ok ? "OK" : "X",
+               t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
+               t->tm_hour, t->tm_min, title, place, note);
     else
-        new_str(buffer, "\t");
+        printf("| %04d.%02d.%02d. %02d:%02d | %s | %s | %s |\n",
+               t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
+               t->tm_hour, t->tm_min, title, place, note);
+}
 
-    str_cd_time(DeadLine->time - currentTime - 3600, buffer);
+void print_dl_table(struct deadline* dl, int all)
+{
+    print_hdr(all, COL_DATE, "Date");
+    print_dl(dl, all);
+    print_sep(all, COL_DATE);
+}
 
-    unsigned int size = 1 + strlen(DeadLine->title) + 1 + strlen(DeadLine->place) + 1 + strlen(DeadLine->note) + 100;
-    char* dl_str      = (char*)malloc(sizeof(char) * size);
-    memset(dl_str, 0, size);
-    sprintf(dl_str, "\t%-15s\t%-15s\t%s", DeadLine->title, DeadLine->place, DeadLine->note);
-    new_str(buffer, dl_str);
-    free(dl_str);
+void str_cd_dl(struct deadline* dl, int all, stringList** buffer)
+{
+    time_t now;
+    time(&now);
+
+    char cd[COL_CDOWN + 1];
+    fmt_cd_time(dl->time - now - 3600, cd);
+
+    char title[COL_TEXT + 1], place[COL_TEXT + 1], note[COL_TEXT + 1];
+    trunc_field(title, dl->title, COL_TEXT);
+    trunc_field(place, dl->place, COL_TEXT);
+    trunc_field(note, dl->note, COL_TEXT);
+
+    char row[200];
+    if (all)
+        snprintf(row, sizeof(row), "| %-*s | %s | %s | %s | %s |\n",
+                 COL_STAT, dl->ok ? "OK" : "X", cd, title, place, note);
+    else
+        snprintf(row, sizeof(row), "| %s | %s | %s | %s |\n",
+                 cd, title, place, note);
+    new_str(buffer, row);
 }
 
 void print_list(struct deadline* List, int all)
 {
-    time_t currentTime;
-    time(&currentTime);
+    time_t now;
+    time(&now);
     byte late = 1, inDay = 1, inWeek = 1, inMonth = 1, inLife = 1;
-    time_t remTime;
+    time_t rem;
+    int has_header = 0;
+
     while (List != NULL)
     {
-        remTime = List->time - currentTime - 3600;
+        rem = List->time - now - 3600;
         if (all || !List->ok)
         {
-            if (late)
+            if (!has_header)
             {
-                printf("ALREADY LATE\n");
+                print_hdr(all, COL_DATE, "Date");
+                has_header = 1;
+            }
+            if (rem <= 0 && late)
+            {
+                print_section_row(all, COL_DATE, "ALREADY LATE");
                 late = 0;
             }
-            if (0 < remTime && inDay)
+            if (0 < rem && inDay)
             {
-                printf("\nIN A DAY\n");
+                print_section_row(all, COL_DATE, "IN A DAY");
                 inDay = 0;
             }
-            if (24 * 3600 < remTime && inWeek)
+            if (24 * 3600 < rem && inWeek)
             {
-                printf("\nIN A WEEK\n");
+                print_section_row(all, COL_DATE, "IN A WEEK");
                 inWeek = 0;
             }
-            if (7 * 24 * 3600 < remTime && inMonth)
+            if (7 * 24 * 3600 < rem && inMonth)
             {
-                printf("\nIN A MONTH\n");
+                print_section_row(all, COL_DATE, "IN A MONTH");
                 inMonth = 0;
             }
-            if (31 * 24 * 3600 < remTime && inLife)
+            if (31 * 24 * 3600 < rem && inLife)
             {
-                printf("\nIN A LIFE\n");
+                print_section_row(all, COL_DATE, "IN A LIFE");
                 inLife = 0;
             }
             print_dl(List, all);
-            printf("\n");
         }
         List = List->next;
     }
+    if (has_header)
+        print_sep(all, COL_DATE);
 }
 
 void str_cd_list(struct deadline* List, int all, stringList** buffer)
 {
-    time_t currentTime;
-    time(&currentTime);
+    time_t now;
+    time(&now);
     byte late = 1, inDay = 1, inWeek = 1, inMonth = 1, inLife = 1;
-    time_t remTime;
+    time_t rem;
+    int has_header = 0;
+
     while (List != NULL)
     {
-        remTime = List->time - currentTime - 3600;
+        rem = List->time - now - 3600;
         if (all || !List->ok)
         {
-            if (late)
+            if (!has_header)
             {
-                new_str(buffer, "ALREADY LATE\n");
+                str_hdr(buffer, all, COL_CDOWN, "Remaining");
+                has_header = 1;
+            }
+            if (rem <= 0 && late)
+            {
+                str_section_row(buffer, all, COL_CDOWN, "ALREADY LATE");
                 late = 0;
             }
-            if (0 < remTime && inDay)
+            if (0 < rem && inDay)
             {
-                new_str(buffer, "\nIN A DAY\n");
+                str_section_row(buffer, all, COL_CDOWN, "IN A DAY");
                 inDay = 0;
             }
-            if (24 * 3600 < remTime && inWeek)
+            if (24 * 3600 < rem && inWeek)
             {
-                new_str(buffer, "\nIN A WEEK\n");
+                str_section_row(buffer, all, COL_CDOWN, "IN A WEEK");
                 inWeek = 0;
             }
-            if (7 * 24 * 3600 < remTime && inMonth)
+            if (7 * 24 * 3600 < rem && inMonth)
             {
-                new_str(buffer, "\nIN A MONTH\n");
+                str_section_row(buffer, all, COL_CDOWN, "IN A MONTH");
                 inMonth = 0;
             }
-            if (31 * 24 * 3600 < remTime && inLife)
+            if (31 * 24 * 3600 < rem && inLife)
             {
-                new_str(buffer, "\nIN A LIFE\n");
+                str_section_row(buffer, all, COL_CDOWN, "IN A LIFE");
                 inLife = 0;
             }
             str_cd_dl(List, all, buffer);
-            new_str(buffer, "\n");
         }
         List = List->next;
     }
+    if (has_header)
+        str_sep(buffer, all, COL_CDOWN);
 }
 
 struct deadline* new_dl(struct deadline* List)
@@ -470,7 +608,7 @@ unsigned int del_dl(struct deadline** List, char* Title)
 
     if (current == NULL)
     {
-        printf("Couldn't find this deadline: %s", Title);
+        printf("Couldn't find this deadline: %s\n", Title);
         return 1;
     }
 
@@ -493,11 +631,11 @@ void ok_dl(struct deadline** List, char* Title)
         current = current->next;
     if (current == NULL)
     {
-        printf("Couldn't find this deadline: %s", Title);
+        printf("Couldn't find this deadline: %s\n", Title);
         return;
     }
     current->ok = 1;
-    printf("%s is now finished!", Title);
+    printf("%s is now finished!\n", Title);
 }
 
 void not_dl(struct deadline** List, char* Title)
@@ -507,11 +645,11 @@ void not_dl(struct deadline** List, char* Title)
         current = current->next;
     if (current == NULL)
     {
-        printf("Couldn't find this deadline: %s", Title);
+        printf("Couldn't find this deadline: %s\n", Title);
         return;
     }
     current->ok = 0;
-    printf("%s is now incomplete!", Title);
+    printf("%s is now incomplete!\n", Title);
 }
 
 void edit_dl(struct deadline** List, char* Title)
@@ -601,8 +739,7 @@ void edit_dl(struct deadline** List, char* Title)
         *List = new_dl(*List);
     }
     printf("\n%s was edited:\n", Title);
-    print_dl(current, 0);
-    printf("\n");
+    print_dl_table(current, 0);
 }
 
 struct deadline* merge(struct deadline* list1, struct deadline* list2)

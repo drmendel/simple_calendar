@@ -46,8 +46,8 @@ int main(void)
             printf("\t\tNEW DEADLINE\n\n");
             List = new_dl(List);
             printf("\nNew deadline:\n");
-            print_dl(List, 0);
-            printf("\n\n");
+            print_dl_table(List, 0);
+            printf("\n");
         }
 
         else if (strcmp(cmd, "d") == 0 || strcmp(cmd, "de") == 0 || strcmp(cmd, "del") == 0)
