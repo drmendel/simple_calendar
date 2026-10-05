@@ -259,16 +259,9 @@ static void print_hdr_row(int all, int date_w, const char* label)
            date_w, label, COL_TEXT, "Title", COL_TEXT, "Place", COL_TEXT, "Note");
 }
 
-static void print_section_title(const char* name, int all, int date_w)
+static void print_section_title(const char* name)
 {
-    int tw       = table_width(all, date_w);
-    int name_len = (int)strlen(name);
-    int fill     = tw - name_len - 5;
-    if (fill < 3) fill = 3;
-
-    printf("\n ━━ %s ", name);
-    for (int i = 0; i < fill; i++) printf("━");
-    printf("\n");
+    printf("\n %s\n", name);
 }
 
 static void str_border(stringList** buf, int all, int date_w,
@@ -315,21 +308,11 @@ static void str_hdr_row(stringList** buf, int all, int date_w, const char* label
     new_str(buf, row);
 }
 
-static void str_section_title(stringList** buf, const char* name, int all, int date_w)
+static void str_section_title(stringList** buf, const char* name)
 {
-    int tw       = table_width(all, date_w);
-    int name_len = (int)strlen(name);
-    int fill     = tw - name_len - 5;
-    if (fill < 3) fill = 3;
-
-    int bufsize = tw * 4 + 16;
-    char* s     = (char*)malloc(bufsize);
-    s[0]        = '\0';
-    strcat(s, "\n ━━ ");
-    strcat(s, name);
-    strcat(s, " ");
-    for (int i = 0; i < fill; i++) strcat(s, "━");
-    strcat(s, "\n");
+    int len = (int)strlen(name) + 4;
+    char* s = (char*)malloc(len);
+    sprintf(s, "\n %s\n", name);
     new_str(buf, s);
     free(s);
 }
@@ -498,7 +481,7 @@ void print_list(struct deadline* List, int all)
             {
                 if (in_table)
                     print_border(all, COL_DATE, "└", "─", "┴", "┘");
-                print_section_title(SECTION_NAMES[sec], all, COL_DATE);
+                print_section_title(SECTION_NAMES[sec]);
                 print_border(all, COL_DATE, "┌", "─", "┬", "┐");
                 print_hdr_row(all, COL_DATE, "Date");
                 print_border(all, COL_DATE, "├", "─", "┼", "┤");
@@ -530,7 +513,7 @@ void str_cd_list(struct deadline* List, int all, stringList** buffer)
             {
                 if (in_table)
                     str_border(buffer, all, COL_CDOWN, "└", "─", "┴", "┘");
-                str_section_title(buffer, SECTION_NAMES[sec], all, COL_CDOWN);
+                str_section_title(buffer, SECTION_NAMES[sec]);
                 str_border(buffer, all, COL_CDOWN, "┌", "─", "┬", "┐");
                 str_hdr_row(buffer, all, COL_CDOWN, "Remaining");
                 str_border(buffer, all, COL_CDOWN, "├", "─", "┼", "┤");
