@@ -62,6 +62,7 @@ void new_str(stringList**, char*);
 void print_str(stringList*);
 void free_str(stringList**);
 char* read_line(void);
+char* read_cmd(const char* prompt);
 long read_int(void);
 void print_dl_table(struct deadline*, int);
 void print_list(struct deadline*, int);

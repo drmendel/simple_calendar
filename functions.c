@@ -137,6 +137,290 @@ void free_str(stringList** buffer)
     }
 }
 
+/* ── Command line editor ────────────────────────────────────── */
+
+#define HIST_SIZE 32
+#define CMD_BUF   256
+
+static const char* COMMANDS[] = {
+    "help", "new", "del", "ok", "incomplete", "edit",
+    "ls", "als", "cd", "acd", "clear", "save", "exit", NULL
+};
+
+static char* cmd_history[HIST_SIZE];
+static int hist_count = 0;
+
+static void hist_add(const char* cmd)
+{
+    if (cmd[0] == '\0') return;
+    if (hist_count > 0 &&
+        strcmp(cmd_history[(hist_count - 1) % HIST_SIZE], cmd) == 0)
+        return;
+    int idx  = hist_count % HIST_SIZE;
+    int slen = (int)strlen(cmd) + 1;
+    free(cmd_history[idx]);
+    cmd_history[idx] = (char*)malloc(slen);
+    memcpy(cmd_history[idx], cmd, slen);
+    hist_count++;
+}
+
+static void line_clear(int pos, int len)
+{
+    for (int i = 0; i < pos; i++) printf("\b");
+    for (int i = 0; i < len; i++) printf(" ");
+    for (int i = 0; i < len; i++) printf("\b");
+    fflush(stdout);
+}
+
+char* read_cmd(const char* prompt)
+{
+    printf("%s", prompt);
+    fflush(stdout);
+
+    char buf[CMD_BUF];
+    int len = 0, pos = 0;
+    int hist_idx = hist_count;
+    char saved[CMD_BUF];
+    saved[0] = '\0';
+    buf[0]   = '\0';
+
+#ifdef _WIN32
+    /* _getch() is already raw on Windows */
+#else
+    struct termios oldt, newt;
+    tcgetattr(STDIN_FILENO, &oldt);
+    newt          = oldt;
+    newt.c_lflag &= ~(ICANON | ECHO);
+    newt.c_cc[VMIN]  = 1;
+    newt.c_cc[VTIME] = 0;
+    tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+#endif
+
+    while (1)
+    {
+#ifdef _WIN32
+        int ch = _getch();
+#else
+        int ch = getchar();
+#endif
+
+        if (ch == '\n' || ch == '\r')
+        {
+            printf("\n");
+            break;
+        }
+        else if (ch == '\t')
+        {
+            if (len == 0) continue;
+            int matches = 0;
+            const char* match = NULL;
+            for (int i = 0; COMMANDS[i]; i++)
+                if (strncmp(buf, COMMANDS[i], len) == 0)
+                {
+                    matches++;
+                    match = COMMANDS[i];
+                }
+            if (matches == 1 && match)
+            {
+                line_clear(pos, len);
+                strcpy(buf, match);
+                len = (int)strlen(buf);
+                pos = len;
+                printf("%s", buf);
+                fflush(stdout);
+            }
+            else if (matches > 1)
+            {
+                printf("\n");
+                for (int i = 0; COMMANDS[i]; i++)
+                    if (strncmp(buf, COMMANDS[i], len) == 0)
+                        printf("  %s", COMMANDS[i]);
+                printf("\n%s%s", prompt, buf);
+                for (int i = len; i > pos; i--) printf("\b");
+                fflush(stdout);
+            }
+        }
+        else if (ch == 127 || ch == 8)
+        {
+            if (pos > 0)
+            {
+                memmove(buf + pos - 1, buf + pos, len - pos);
+                len--;
+                pos--;
+                buf[len] = '\0';
+                printf("\b%s ", buf + pos);
+                for (int i = 0; i < len - pos + 1; i++) printf("\b");
+                fflush(stdout);
+            }
+        }
+        else if (ch == 21)
+        {
+            line_clear(pos, len);
+            len = pos = 0;
+            buf[0] = '\0';
+        }
+        else if (ch == 1)
+        {
+            for (int i = 0; i < pos; i++) printf("\b");
+            pos = 0;
+            fflush(stdout);
+        }
+        else if (ch == 5)
+        {
+            printf("%s", buf + pos);
+            pos = len;
+            fflush(stdout);
+        }
+#ifdef _WIN32
+        else if (ch == 0 || ch == 0xE0)
+        {
+            int ch2    = _getch();
+            int oldest = hist_count > HIST_SIZE ? hist_count - HIST_SIZE : 0;
+            if (ch2 == 72 && hist_idx > oldest)
+            {
+                if (hist_idx == hist_count) memcpy(saved, buf, len + 1);
+                hist_idx--;
+                line_clear(pos, len);
+                strcpy(buf, cmd_history[hist_idx % HIST_SIZE]);
+                len = (int)strlen(buf);
+                pos = len;
+                printf("%s", buf);
+                fflush(stdout);
+            }
+            else if (ch2 == 80 && hist_idx < hist_count)
+            {
+                hist_idx++;
+                line_clear(pos, len);
+                if (hist_idx == hist_count)
+                    memcpy(buf, saved, strlen(saved) + 1);
+                else
+                    strcpy(buf, cmd_history[hist_idx % HIST_SIZE]);
+                len = (int)strlen(buf);
+                pos = len;
+                printf("%s", buf);
+                fflush(stdout);
+            }
+            else if (ch2 == 75 && pos > 0)
+            {
+                printf("\b");
+                pos--;
+                fflush(stdout);
+            }
+            else if (ch2 == 77 && pos < len)
+            {
+                printf("%c", buf[pos]);
+                pos++;
+                fflush(stdout);
+            }
+            else if (ch2 == 83 && pos < len)
+            {
+                memmove(buf + pos, buf + pos + 1, len - pos - 1);
+                len--;
+                buf[len] = '\0';
+                printf("%s ", buf + pos);
+                for (int i = 0; i < len - pos + 1; i++) printf("\b");
+                fflush(stdout);
+            }
+        }
+#else
+        else if (ch == 27)
+        {
+            int seq1 = getchar();
+            if (seq1 != '[') continue;
+            int seq2   = getchar();
+            int oldest = hist_count > HIST_SIZE ? hist_count - HIST_SIZE : 0;
+
+            if (seq2 == 'A' && hist_idx > oldest)
+            {
+                if (hist_idx == hist_count) memcpy(saved, buf, len + 1);
+                hist_idx--;
+                line_clear(pos, len);
+                strcpy(buf, cmd_history[hist_idx % HIST_SIZE]);
+                len = (int)strlen(buf);
+                pos = len;
+                printf("%s", buf);
+                fflush(stdout);
+            }
+            else if (seq2 == 'B' && hist_idx < hist_count)
+            {
+                hist_idx++;
+                line_clear(pos, len);
+                if (hist_idx == hist_count)
+                    memcpy(buf, saved, strlen(saved) + 1);
+                else
+                    strcpy(buf, cmd_history[hist_idx % HIST_SIZE]);
+                len = (int)strlen(buf);
+                pos = len;
+                printf("%s", buf);
+                fflush(stdout);
+            }
+            else if (seq2 == 'C' && pos < len)
+            {
+                printf("\x1b[C");
+                pos++;
+                fflush(stdout);
+            }
+            else if (seq2 == 'D' && pos > 0)
+            {
+                printf("\x1b[D");
+                pos--;
+                fflush(stdout);
+            }
+            else if (seq2 == '3')
+            {
+                int seq3 = getchar();
+                if (seq3 == '~' && pos < len)
+                {
+                    memmove(buf + pos, buf + pos + 1, len - pos - 1);
+                    len--;
+                    buf[len] = '\0';
+                    printf("%s ", buf + pos);
+                    for (int i = 0; i < len - pos + 1; i++) printf("\b");
+                    fflush(stdout);
+                }
+            }
+            else if (seq2 == 'H')
+            {
+                for (int i = 0; i < pos; i++) printf("\b");
+                pos = 0;
+                fflush(stdout);
+            }
+            else if (seq2 == 'F')
+            {
+                printf("%s", buf + pos);
+                pos = len;
+                fflush(stdout);
+            }
+        }
+#endif
+        else if (ch >= 32 && ch < 127)
+        {
+            if (len < CMD_BUF - 1)
+            {
+                memmove(buf + pos + 1, buf + pos, len - pos);
+                buf[pos] = (char)ch;
+                len++;
+                buf[len] = '\0';
+                printf("%s", buf + pos);
+                pos++;
+                for (int i = len; i > pos; i--) printf("\b");
+                fflush(stdout);
+            }
+        }
+    }
+
+#ifndef _WIN32
+    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+#endif
+
+    buf[len] = '\0';
+    hist_add(buf);
+
+    char* result = (char*)malloc(len + 1);
+    memcpy(result, buf, len + 1);
+    return result;
+}
+
 /* ── Table formatting ───────────────────────────────────────── */
 
 #define COL_STAT   4

@@ -14,8 +14,7 @@ int main(void)
     {
         cmd = NULL;
         printf(CLR_BOLD "  SIMPLE CALENDAR" CLR_RESET "\n\n");
-        printf(" ~ ");
-        cmd = read_line();
+        cmd = read_cmd(" ~ ");
 
         if (cmd == NULL || cmd[0] == '\0')
         {
