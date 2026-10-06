@@ -433,6 +433,8 @@ static int utf8_width(const char* s)
 
 static void trunc_field(char* dst, const char* src, int width)
 {
+    if (width <= 0) { dst[0] = '\0'; return; }
+
     int disp_w   = utf8_width(src);
     int byte_len = (int)strlen(src);
 
@@ -442,6 +444,19 @@ static void trunc_field(char* dst, const char* src, int width)
         int pad = width - disp_w;
         memset(dst + byte_len, ' ', pad);
         dst[byte_len + pad] = '\0';
+    }
+    else if (width < 4)
+    {
+        int cols = 0, i = 0;
+        while (src[i] && cols < width)
+        {
+            if ((src[i] & 0xC0) != 0x80) cols++;
+            i++;
+        }
+        memcpy(dst, src, i);
+        int pad = width - cols;
+        if (pad > 0) memset(dst + i, ' ', pad);
+        dst[i + (pad > 0 ? pad : 0)] = '\0';
     }
     else
     {
@@ -463,15 +478,39 @@ static void trunc_field(char* dst, const char* src, int width)
     }
 }
 
+static void fmt_cd_time(time_t rem, char* out)
+{
+    time_t a = rem < 0 ? -rem : rem;
+    int d    = (int)(a / (24 * 3600));
+    a       %= (24 * 3600);
+    int h    = (int)(a / 3600);
+    a       %= 3600;
+    int m    = (int)(a / 60);
+    int s    = (int)(a % 60);
+
+    char* p = out;
+    if (rem < 0) *p++ = '-';
+    if (d > 365)
+        sprintf(p, "%dy %dd %02d:%02d:%02d", d / 365, d % 365, h, m, s);
+    else if (d > 0)
+        sprintf(p, "%dd %02d:%02d:%02d", d, h, m, s);
+    else
+        sprintf(p, "%02d:%02d:%02d", h, m, s);
+}
+
 #define COL_STAT   4
 #define COL_DATE  17
 #define COL_CDOWN 22
-#define COL_MIN    5
+#define COL_MIN    4
 #define COL_BUF  128
 
-static int g_title_w = 5;
-static int g_place_w = 5;
-static int g_note_w  = 4;
+static int g_date_w     = COL_DATE;
+static int g_title_w    = 5;
+static int g_place_w    = 5;
+static int g_note_w     = 4;
+static int g_show_title = 1;
+static int g_show_place = 1;
+static int g_show_note  = 1;
 
 volatile int g_resized = 0;
 
@@ -502,7 +541,11 @@ static int get_term_width(void)
 
 static void compute_col_widths(struct deadline* dl, int all, int date_w, int single)
 {
+    g_show_title = 1; g_show_place = 1; g_show_note = 1;
+
     int max_t = 5, max_p = 5, max_n = 4;
+    int max_d = date_w;
+    int cd_mode = (date_w == COL_CDOWN);
 
     if (single)
     {
@@ -512,45 +555,116 @@ static void compute_col_widths(struct deadline* dl, int all, int date_w, int sin
         if (tw > max_t) max_t = tw;
         if (pw > max_p) max_p = pw;
         if (nw > max_n) max_n = nw;
+        if (cd_mode)
+        {
+            char tmp[64];
+            time_t now; time(&now);
+            fmt_cd_time(dl->time - now - 3600, tmp);
+            max_d = utf8_width(tmp);
+            if (max_d < 9) max_d = 9;
+        }
     }
     else
     {
-        while (dl)
+        time_t now; time(&now);
+        if (cd_mode) max_d = 9;
+        struct deadline* p = dl;
+        while (p)
         {
-            if (all || !dl->ok)
+            if (all || !p->ok)
             {
-                int tw = utf8_width(dl->title);
-                int pw = utf8_width(dl->place);
-                int nw = utf8_width(dl->note);
+                int tw = utf8_width(p->title);
+                int pw = utf8_width(p->place);
+                int nw = utf8_width(p->note);
                 if (tw > max_t) max_t = tw;
                 if (pw > max_p) max_p = pw;
                 if (nw > max_n) max_n = nw;
+                if (cd_mode)
+                {
+                    char tmp[64];
+                    fmt_cd_time(p->time - now - 3600, tmp);
+                    int dw = utf8_width(tmp);
+                    if (dw > max_d) max_d = dw;
+                }
             }
-            dl = dl->next;
+            p = p->next;
         }
     }
+    if (max_d > date_w) max_d = date_w;
+    g_date_w = max_d;
 
-    int overhead = (all ? 20 : 13) + date_w;
-    int avail    = get_term_width() - overhead;
-    int total    = max_t + max_p + max_n;
+    int term_w = get_term_width();
+    int base   = 1 + (all ? COL_STAT + 3 : 0) + (max_d + 3);
+    int avail, total;
 
-    if (total <= avail)
+    /* Phase 1: all 3 text columns */
+    avail = term_w - base - 9;
+    total = max_t + max_p + max_n;
+    if (avail >= total)
     {
-        g_title_w = max_t;
-        g_place_w = max_p;
-        g_note_w  = max_n;
+        g_title_w = max_t; g_place_w = max_p; g_note_w = max_n;
+        return;
     }
-    else
+    if (avail >= COL_MIN * 3)
     {
-        if (avail < COL_MIN * 3) avail = COL_MIN * 3;
         double ratio = (double)avail / total;
-        g_title_w    = (int)(max_t * ratio);
-        g_place_w    = (int)(max_p * ratio);
-        g_note_w     = avail - g_title_w - g_place_w;
+        g_title_w = (int)(max_t * ratio);
+        g_place_w = (int)(max_p * ratio);
+        g_note_w  = avail - g_title_w - g_place_w;
         if (g_title_w < COL_MIN) g_title_w = COL_MIN;
         if (g_place_w < COL_MIN) g_place_w = COL_MIN;
         if (g_note_w  < COL_MIN) g_note_w  = COL_MIN;
+        return;
     }
+
+    /* Phase 2: drop note */
+    g_show_note = 0;
+    avail = term_w - base - 6;
+    total = max_t + max_p;
+    if (avail >= total)
+    {
+        g_title_w = max_t; g_place_w = max_p;
+        return;
+    }
+    if (avail >= COL_MIN * 2)
+    {
+        double ratio = (double)avail / total;
+        g_title_w = (int)(max_t * ratio);
+        g_place_w = avail - g_title_w;
+        if (g_title_w < COL_MIN) g_title_w = COL_MIN;
+        if (g_place_w < COL_MIN) g_place_w = COL_MIN;
+        return;
+    }
+
+    /* Phase 3: drop place, shrink title */
+    g_show_place = 0;
+    avail = term_w - base - 3;
+    if (avail >= COL_MIN)
+    {
+        g_title_w = avail > max_t ? max_t : avail;
+        return;
+    }
+
+    /* Phase 4: shrink date too, keep title */
+    avail = term_w - 1 - (all ? COL_STAT + 3 : 0) - 6;
+    if (avail >= COL_MIN * 2)
+    {
+        g_title_w = COL_MIN;
+        g_date_w  = avail - COL_MIN;
+        if (g_date_w > max_d) g_date_w = max_d;
+        return;
+    }
+
+    /* Phase 5: drop title */
+    g_show_title = 0;
+    avail = term_w - 1 - (all ? COL_STAT + 3 : 0) - 3;
+    if (avail >= 1)
+    {
+        g_date_w = avail > max_d ? max_d : avail;
+        return;
+    }
+
+    g_date_w = 1;
 }
 
 static const char* SECTION_NAMES[] = {
@@ -570,34 +684,28 @@ static int get_section(time_t rem)
     return 4;
 }
 
-static int table_width(int all, int date_w)
+static int table_width(int all)
 {
     int w = 1;
     if (all) w += COL_STAT + 3;
-    w += date_w + 3;
-    w += g_title_w + 3;
-    w += g_place_w + 3;
-    w += g_note_w + 3;
+    w += g_date_w + 3;
+    if (g_show_title) w += g_title_w + 3;
+    if (g_show_place) w += g_place_w + 3;
+    if (g_show_note)  w += g_note_w + 3;
     return w;
 }
 
-static void print_border(int all, int date_w,
+static void print_border(int all,
                           const char* l, const char* h,
                           const char* c, const char* r)
 {
-    int widths[5], ncols;
-    if (all)
-    {
-        widths[0] = COL_STAT; widths[1] = date_w;
-        widths[2] = g_title_w; widths[3] = g_place_w; widths[4] = g_note_w;
-        ncols = 5;
-    }
-    else
-    {
-        widths[0] = date_w;
-        widths[1] = g_title_w; widths[2] = g_place_w; widths[3] = g_note_w;
-        ncols = 4;
-    }
+    int widths[5], ncols = 0;
+    if (all) widths[ncols++] = COL_STAT;
+    widths[ncols++] = g_date_w;
+    if (g_show_title) widths[ncols++] = g_title_w;
+    if (g_show_place) widths[ncols++] = g_place_w;
+    if (g_show_note)  widths[ncols++] = g_note_w;
+
     printf("%s", l);
     for (int col = 0; col < ncols; col++)
     {
@@ -607,15 +715,18 @@ static void print_border(int all, int date_w,
     printf("\n");
 }
 
-static void print_hdr_row(int all, int date_w, const char* label)
+static void print_hdr_row(int all, const char* label)
 {
     if (all)
         printf("│ " CLR_DIM "%-*s" CLR_RESET " ", COL_STAT, "Stat");
-    printf("│ " CLR_DIM "%-*s" CLR_RESET
-           " │ " CLR_DIM "%-*s" CLR_RESET
-           " │ " CLR_DIM "%-*s" CLR_RESET
-           " │ " CLR_DIM "%-*s" CLR_RESET " │\n",
-           date_w, label, g_title_w, "Title", g_place_w, "Place", g_note_w, "Note");
+    printf("│ " CLR_DIM "%-*s" CLR_RESET " ", g_date_w, label);
+    if (g_show_title)
+        printf("│ " CLR_DIM "%-*s" CLR_RESET " ", g_title_w, "Title");
+    if (g_show_place)
+        printf("│ " CLR_DIM "%-*s" CLR_RESET " ", g_place_w, "Place");
+    if (g_show_note)
+        printf("│ " CLR_DIM "%-*s" CLR_RESET " ", g_note_w, "Note");
+    printf("│\n");
 }
 
 static void print_section_title(int sec)
@@ -623,27 +734,21 @@ static void print_section_title(int sec)
     printf("\n %s%s%s\n", SECTION_COLORS[sec], SECTION_NAMES[sec], CLR_RESET);
 }
 
-static void str_border(stringList** buf, int all, int date_w,
+static void str_border(stringList** buf, int all,
                         const char* l, const char* h,
                         const char* c, const char* r)
 {
-    int bufsize = table_width(all, date_w) * 4 + 8;
+    int bufsize = table_width(all) * 4 + 8;
     char* s     = (char*)malloc(bufsize);
     s[0]        = '\0';
 
-    int widths[5], ncols;
-    if (all)
-    {
-        widths[0] = COL_STAT; widths[1] = date_w;
-        widths[2] = g_title_w; widths[3] = g_place_w; widths[4] = g_note_w;
-        ncols = 5;
-    }
-    else
-    {
-        widths[0] = date_w;
-        widths[1] = g_title_w; widths[2] = g_place_w; widths[3] = g_note_w;
-        ncols = 4;
-    }
+    int widths[5], ncols = 0;
+    if (all) widths[ncols++] = COL_STAT;
+    widths[ncols++] = g_date_w;
+    if (g_show_title) widths[ncols++] = g_title_w;
+    if (g_show_place) widths[ncols++] = g_place_w;
+    if (g_show_note)  widths[ncols++] = g_note_w;
+
     strcat(s, l);
     for (int col = 0; col < ncols; col++)
     {
@@ -655,25 +760,25 @@ static void str_border(stringList** buf, int all, int date_w,
     free(s);
 }
 
-static void str_hdr_row(stringList** buf, int all, int date_w, const char* label)
+static void str_hdr_row(stringList** buf, int all, const char* label)
 {
     char row[512];
+    int pos = 0;
     if (all)
-        snprintf(row, sizeof(row),
-                 "│ " CLR_DIM "%-*s" CLR_RESET
-                 " │ " CLR_DIM "%-*s" CLR_RESET
-                 " │ " CLR_DIM "%-*s" CLR_RESET
-                 " │ " CLR_DIM "%-*s" CLR_RESET
-                 " │ " CLR_DIM "%-*s" CLR_RESET " │\n",
-                 COL_STAT, "Stat", date_w, label,
-                 g_title_w, "Title", g_place_w, "Place", g_note_w, "Note");
-    else
-        snprintf(row, sizeof(row),
-                 "│ " CLR_DIM "%-*s" CLR_RESET
-                 " │ " CLR_DIM "%-*s" CLR_RESET
-                 " │ " CLR_DIM "%-*s" CLR_RESET
-                 " │ " CLR_DIM "%-*s" CLR_RESET " │\n",
-                 date_w, label, g_title_w, "Title", g_place_w, "Place", g_note_w, "Note");
+        pos += snprintf(row + pos, sizeof(row) - pos,
+                        "│ " CLR_DIM "%-*s" CLR_RESET " ", COL_STAT, "Stat");
+    pos += snprintf(row + pos, sizeof(row) - pos,
+                    "│ " CLR_DIM "%-*s" CLR_RESET " ", g_date_w, label);
+    if (g_show_title)
+        pos += snprintf(row + pos, sizeof(row) - pos,
+                        "│ " CLR_DIM "%-*s" CLR_RESET " ", g_title_w, "Title");
+    if (g_show_place)
+        pos += snprintf(row + pos, sizeof(row) - pos,
+                        "│ " CLR_DIM "%-*s" CLR_RESET " ", g_place_w, "Place");
+    if (g_show_note)
+        pos += snprintf(row + pos, sizeof(row) - pos,
+                        "│ " CLR_DIM "%-*s" CLR_RESET " ", g_note_w, "Note");
+    snprintf(row + pos, sizeof(row) - pos, "│\n");
     new_str(buf, row);
 }
 
@@ -682,27 +787,6 @@ static void str_section_title(stringList** buf, int sec)
     char s[64];
     sprintf(s, "\n %s%s%s\n", SECTION_COLORS[sec], SECTION_NAMES[sec], CLR_RESET);
     new_str(buf, s);
-}
-
-static void fmt_cd_time(time_t rem, char* out)
-{
-    time_t a = rem < 0 ? -rem : rem;
-    int d    = (int)(a / (24 * 3600));
-    a       %= (24 * 3600);
-    int h    = (int)(a / 3600);
-    a       %= 3600;
-    int m    = (int)(a / 60);
-    int s    = (int)(a % 60);
-
-    char tmp[64];
-    if (d > 365)
-        sprintf(tmp, "%dy %dd %02d:%02d:%02d", d / 365, d % 365, h, m, s);
-    else if (d > 0)
-        sprintf(tmp, "%dd %02d:%02d:%02d", d, h, m, s);
-    else
-        sprintf(tmp, "%02d:%02d:%02d", h, m, s);
-
-    sprintf(out, "%c%*s", rem < 0 ? '-' : ' ', COL_CDOWN - 1, tmp);
 }
 
 /* ── Deadline helpers ───────────────────────────────────────── */
@@ -776,59 +860,79 @@ long read_int(void)
 static void print_dl(struct deadline* dl, int all)
 {
     struct tm* t = gmtime(&dl->time);
-    char title[COL_BUF], place[COL_BUF], note[COL_BUF];
-    trunc_field(title, dl->title, g_title_w);
-    trunc_field(place, dl->place, g_place_w);
-    trunc_field(note, dl->note, g_note_w);
+    char date_raw[64];
+    sprintf(date_raw, "%04d.%02d.%02d. %02d:%02d",
+            t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
+            t->tm_hour, t->tm_min);
+    char date_buf[COL_BUF];
+    trunc_field(date_buf, date_raw, g_date_w);
 
     if (all)
-        printf("│ %s%-*s%s │ %04d.%02d.%02d. %02d:%02d │ %s │ %s │ %s │\n",
-               dl->ok ? CLR_GRN : CLR_RED,
-               COL_STAT, dl->ok ? "OK" : "X",
-               CLR_RESET,
-               t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
-               t->tm_hour, t->tm_min, title, place, note);
-    else
-        printf("│ %04d.%02d.%02d. %02d:%02d │ %s │ %s │ %s │\n",
-               t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
-               t->tm_hour, t->tm_min, title, place, note);
+        printf("│ %s%-*s%s ", dl->ok ? CLR_GRN : CLR_RED,
+               COL_STAT, dl->ok ? "OK" : "X", CLR_RESET);
+    printf("│ %s ", date_buf);
+    if (g_show_title)
+    {
+        char title[COL_BUF]; trunc_field(title, dl->title, g_title_w);
+        printf("│ %s ", title);
+    }
+    if (g_show_place)
+    {
+        char place[COL_BUF]; trunc_field(place, dl->place, g_place_w);
+        printf("│ %s ", place);
+    }
+    if (g_show_note)
+    {
+        char note[COL_BUF]; trunc_field(note, dl->note, g_note_w);
+        printf("│ %s ", note);
+    }
+    printf("│\n");
 }
 
 void print_dl_table(struct deadline* dl, int all)
 {
     compute_col_widths(dl, all, COL_DATE, 1);
-    print_border(all, COL_DATE, "┌", "─", "┬", "┐");
-    print_hdr_row(all, COL_DATE, "Date");
-    print_border(all, COL_DATE, "├", "─", "┼", "┤");
+    print_border(all, "┌", "─", "┬", "┐");
+    print_hdr_row(all, "Date");
+    print_border(all, "├", "─", "┼", "┤");
     print_dl(dl, all);
-    print_border(all, COL_DATE, "└", "─", "┴", "┘");
+    print_border(all, "└", "─", "┴", "┘");
 }
 
 static void str_cd_dl(struct deadline* dl, int all, time_t now, stringList** buffer)
 {
-    char cd[COL_CDOWN + 1];
+    char cd_raw[64];
     time_t rem = dl->time - now - 3600;
-    fmt_cd_time(rem, cd);
-
-    char title[COL_BUF], place[COL_BUF], note[COL_BUF];
-    trunc_field(title, dl->title, g_title_w);
-    trunc_field(place, dl->place, g_place_w);
-    trunc_field(note, dl->note, g_note_w);
+    fmt_cd_time(rem, cd_raw);
+    char cd[COL_BUF];
+    trunc_field(cd, cd_raw, g_date_w);
 
     char row[512];
+    int pos = 0;
     if (all)
-        snprintf(row, sizeof(row),
-                 "│ %s%-*s%s │ %s%s%s │ %s │ %s │ %s │\n",
-                 dl->ok ? CLR_GRN : CLR_RED,
-                 COL_STAT, dl->ok ? "OK" : "X",
-                 CLR_RESET,
-                 rem < 0 ? CLR_RED : "", cd, rem < 0 ? CLR_RESET : "",
-                 title, place, note);
-    else
-        snprintf(row, sizeof(row),
-                 "│ %s%s%s │ %s │ %s │ %s │\n",
-                 rem < 0 ? CLR_RED : "", cd, rem < 0 ? CLR_RESET : "",
-                 title, place, note);
+        pos += snprintf(row + pos, sizeof(row) - pos,
+                        "│ %s%-*s%s ",
+                        dl->ok ? CLR_GRN : CLR_RED,
+                        COL_STAT, dl->ok ? "OK" : "X", CLR_RESET);
+    pos += snprintf(row + pos, sizeof(row) - pos,
+                    "│ %s%s%s ",
+                    rem < 0 ? CLR_RED : "", cd, rem < 0 ? CLR_RESET : "");
+    if (g_show_title)
+    {
+        char title[COL_BUF]; trunc_field(title, dl->title, g_title_w);
+        pos += snprintf(row + pos, sizeof(row) - pos, "│ %s ", title);
+    }
+    if (g_show_place)
+    {
+        char place[COL_BUF]; trunc_field(place, dl->place, g_place_w);
+        pos += snprintf(row + pos, sizeof(row) - pos, "│ %s ", place);
+    }
+    if (g_show_note)
+    {
+        char note[COL_BUF]; trunc_field(note, dl->note, g_note_w);
+        pos += snprintf(row + pos, sizeof(row) - pos, "│ %s ", note);
+    }
+    snprintf(row + pos, sizeof(row) - pos, "│\n");
     new_str(buffer, row);
 }
 
@@ -849,11 +953,11 @@ void print_list(struct deadline* List, int all)
             if (sec != cur_sec)
             {
                 if (in_table)
-                    print_border(all, COL_DATE, "└", "─", "┴", "┘");
+                    print_border(all, "└", "─", "┴", "┘");
                 print_section_title(sec);
-                print_border(all, COL_DATE, "┌", "─", "┬", "┐");
-                print_hdr_row(all, COL_DATE, "Date");
-                print_border(all, COL_DATE, "├", "─", "┼", "┤");
+                print_border(all, "┌", "─", "┬", "┐");
+                print_hdr_row(all, "Date");
+                print_border(all, "├", "─", "┼", "┤");
                 cur_sec  = sec;
                 in_table = 1;
             }
@@ -862,7 +966,7 @@ void print_list(struct deadline* List, int all)
         List = List->next;
     }
     if (in_table)
-        print_border(all, COL_DATE, "└", "─", "┴", "┘");
+        print_border(all, "└", "─", "┴", "┘");
 }
 
 void str_cd_list(struct deadline* List, int all, stringList** buffer)
@@ -882,11 +986,11 @@ void str_cd_list(struct deadline* List, int all, stringList** buffer)
             if (sec != cur_sec)
             {
                 if (in_table)
-                    str_border(buffer, all, COL_CDOWN, "└", "─", "┴", "┘");
+                    str_border(buffer, all, "└", "─", "┴", "┘");
                 str_section_title(buffer, sec);
-                str_border(buffer, all, COL_CDOWN, "┌", "─", "┬", "┐");
-                str_hdr_row(buffer, all, COL_CDOWN, "Remaining");
-                str_border(buffer, all, COL_CDOWN, "├", "─", "┼", "┤");
+                str_border(buffer, all, "┌", "─", "┬", "┐");
+                str_hdr_row(buffer, all, "Remaining");
+                str_border(buffer, all, "├", "─", "┼", "┤");
                 cur_sec  = sec;
                 in_table = 1;
             }
@@ -895,7 +999,7 @@ void str_cd_list(struct deadline* List, int all, stringList** buffer)
         List = List->next;
     }
     if (in_table)
-        str_border(buffer, all, COL_CDOWN, "└", "─", "┴", "┘");
+        str_border(buffer, all, "└", "─", "┴", "┘");
 }
 
 struct deadline* new_dl(struct deadline* List)
