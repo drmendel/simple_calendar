@@ -427,7 +427,33 @@ char* read_cmd(const char* prompt)
 #define COL_DATE  17
 #define COL_CDOWN 22
 #define COL_TEXT  25
+#define COL_MIN    8
 #define COL_BUF  128
+
+static int g_shrink_w = COL_TEXT;
+
+static int get_term_width(void)
+{
+#ifdef _WIN32
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi))
+        return csbi.srWindow.Right - csbi.srWindow.Left + 1;
+#else
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0)
+        return ws.ws_col;
+#endif
+    return 120;
+}
+
+static void update_col_widths(int all, int date_w)
+{
+    int tw       = get_term_width();
+    int fixed    = 1 + (all ? COL_STAT + 3 : 0) + (date_w + 3) + (COL_TEXT + 3) + 3 + 3;
+    g_shrink_w   = (tw - fixed) / 2;
+    if (g_shrink_w < COL_MIN) g_shrink_w = COL_MIN;
+    if (g_shrink_w > COL_TEXT) g_shrink_w = COL_TEXT;
+}
 
 static const char* SECTION_NAMES[] = {
     "ALREADY LATE", "IN A DAY", "IN A WEEK", "IN A MONTH", "IN A LIFE"
@@ -491,7 +517,8 @@ static int table_width(int all, int date_w)
     int w = 1;
     if (all) w += COL_STAT + 3;
     w += date_w + 3;
-    w += (COL_TEXT + 3) * 3;
+    w += COL_TEXT + 3;
+    w += (g_shrink_w + 3) * 2;
     return w;
 }
 
@@ -503,13 +530,13 @@ static void print_border(int all, int date_w,
     if (all)
     {
         widths[0] = COL_STAT; widths[1] = date_w;
-        widths[2] = COL_TEXT; widths[3] = COL_TEXT; widths[4] = COL_TEXT;
+        widths[2] = COL_TEXT; widths[3] = g_shrink_w; widths[4] = g_shrink_w;
         ncols = 5;
     }
     else
     {
         widths[0] = date_w;
-        widths[1] = COL_TEXT; widths[2] = COL_TEXT; widths[3] = COL_TEXT;
+        widths[1] = COL_TEXT; widths[2] = g_shrink_w; widths[3] = g_shrink_w;
         ncols = 4;
     }
     printf("%s", l);
@@ -529,7 +556,7 @@ static void print_hdr_row(int all, int date_w, const char* label)
            " │ " CLR_DIM "%-*s" CLR_RESET
            " │ " CLR_DIM "%-*s" CLR_RESET
            " │ " CLR_DIM "%-*s" CLR_RESET " │\n",
-           date_w, label, COL_TEXT, "Title", COL_TEXT, "Place", COL_TEXT, "Note");
+           date_w, label, COL_TEXT, "Title", g_shrink_w, "Place", g_shrink_w, "Note");
 }
 
 static void print_section_title(int sec)
@@ -549,13 +576,13 @@ static void str_border(stringList** buf, int all, int date_w,
     if (all)
     {
         widths[0] = COL_STAT; widths[1] = date_w;
-        widths[2] = COL_TEXT; widths[3] = COL_TEXT; widths[4] = COL_TEXT;
+        widths[2] = COL_TEXT; widths[3] = g_shrink_w; widths[4] = g_shrink_w;
         ncols = 5;
     }
     else
     {
         widths[0] = date_w;
-        widths[1] = COL_TEXT; widths[2] = COL_TEXT; widths[3] = COL_TEXT;
+        widths[1] = COL_TEXT; widths[2] = g_shrink_w; widths[3] = g_shrink_w;
         ncols = 4;
     }
     strcat(s, l);
@@ -580,14 +607,14 @@ static void str_hdr_row(stringList** buf, int all, int date_w, const char* label
                  " │ " CLR_DIM "%-*s" CLR_RESET
                  " │ " CLR_DIM "%-*s" CLR_RESET " │\n",
                  COL_STAT, "Stat", date_w, label,
-                 COL_TEXT, "Title", COL_TEXT, "Place", COL_TEXT, "Note");
+                 COL_TEXT, "Title", g_shrink_w, "Place", g_shrink_w, "Note");
     else
         snprintf(row, sizeof(row),
                  "│ " CLR_DIM "%-*s" CLR_RESET
                  " │ " CLR_DIM "%-*s" CLR_RESET
                  " │ " CLR_DIM "%-*s" CLR_RESET
                  " │ " CLR_DIM "%-*s" CLR_RESET " │\n",
-                 date_w, label, COL_TEXT, "Title", COL_TEXT, "Place", COL_TEXT, "Note");
+                 date_w, label, COL_TEXT, "Title", g_shrink_w, "Place", g_shrink_w, "Note");
     new_str(buf, row);
 }
 
@@ -692,8 +719,8 @@ static void print_dl(struct deadline* dl, int all)
     struct tm* t = gmtime(&dl->time);
     char title[COL_BUF], place[COL_BUF], note[COL_BUF];
     trunc_field(title, dl->title, COL_TEXT);
-    trunc_field(place, dl->place, COL_TEXT);
-    trunc_field(note, dl->note, COL_TEXT);
+    trunc_field(place, dl->place, g_shrink_w);
+    trunc_field(note, dl->note, g_shrink_w);
 
     if (all)
         printf("│ %s%-*s%s │ %04d.%02d.%02d. %02d:%02d │ %s │ %s │ %s │\n",
@@ -710,6 +737,7 @@ static void print_dl(struct deadline* dl, int all)
 
 void print_dl_table(struct deadline* dl, int all)
 {
+    update_col_widths(all, COL_DATE);
     print_border(all, COL_DATE, "┌", "─", "┬", "┐");
     print_hdr_row(all, COL_DATE, "Date");
     print_border(all, COL_DATE, "├", "─", "┼", "┤");
@@ -725,8 +753,8 @@ static void str_cd_dl(struct deadline* dl, int all, time_t now, stringList** buf
 
     char title[COL_BUF], place[COL_BUF], note[COL_BUF];
     trunc_field(title, dl->title, COL_TEXT);
-    trunc_field(place, dl->place, COL_TEXT);
-    trunc_field(note, dl->note, COL_TEXT);
+    trunc_field(place, dl->place, g_shrink_w);
+    trunc_field(note, dl->note, g_shrink_w);
 
     char row[512];
     if (all)
@@ -747,6 +775,7 @@ static void str_cd_dl(struct deadline* dl, int all, time_t now, stringList** buf
 
 void print_list(struct deadline* List, int all)
 {
+    update_col_widths(all, COL_DATE);
     time_t now;
     time(&now);
     int cur_sec  = -1;
@@ -779,6 +808,7 @@ void print_list(struct deadline* List, int all)
 
 void str_cd_list(struct deadline* List, int all, stringList** buffer)
 {
+    update_col_widths(all, COL_CDOWN);
     time_t now;
     time(&now);
     int cur_sec  = -1;

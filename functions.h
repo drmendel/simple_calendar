@@ -24,6 +24,7 @@
 #include <unistd.h>
 #include <termios.h>
 #include <fcntl.h>
+#include <sys/ioctl.h>
 typedef unsigned char byte;
 int kbhit(void);
 int sc_getch(void);
