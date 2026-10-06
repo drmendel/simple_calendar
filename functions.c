@@ -119,8 +119,7 @@ void print_str(stringList* buffer)
         strcat(out, buffer->string);
         buffer = buffer->next;
     }
-    goto_xy(0, 0);
-    printf("%s\x1b[J", out);
+    printf("\x1b[2J\x1b[H%s", out);
     fflush(stdout);
     free(out);
 }
