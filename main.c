@@ -120,20 +120,21 @@ int main(void)
             int show_all       = (cmd[0] == 'a');
             stringList* buffer = NULL;
             List               = mergeSort(List);
-            int cleared        = 0;
+            install_resize_handler();
+            sc_clear();
 
             while (1)
             {
+                if (g_resized)
+                {
+                    sc_clear();
+                    g_resized = 0;
+                }
+
                 new_str(&buffer, CLR_BOLD "  SIMPLE CALENDAR" CLR_RESET "\n\n");
                 new_str(&buffer, CLR_BOLD "  COUNTDOWN" CLR_RESET "\n");
                 str_cd_list(List, show_all, &buffer);
                 new_str(&buffer, "\n  " CLR_DIM "Press ESC to go back" CLR_RESET);
-
-                if (!cleared)
-                {
-                    sc_clear();
-                    cleared = 1;
-                }
 
                 cursor(0);
                 print_str(buffer);

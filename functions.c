@@ -423,55 +423,6 @@ char* read_cmd(const char* prompt)
 
 /* ── Table formatting ───────────────────────────────────────── */
 
-#define COL_STAT   4
-#define COL_DATE  17
-#define COL_CDOWN 22
-#define COL_TEXT  25
-#define COL_MIN    8
-#define COL_BUF  128
-
-static int g_shrink_w = COL_TEXT;
-
-static int get_term_width(void)
-{
-#ifdef _WIN32
-    CONSOLE_SCREEN_BUFFER_INFO csbi;
-    if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi))
-        return csbi.srWindow.Right - csbi.srWindow.Left + 1;
-#else
-    struct winsize ws;
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0)
-        return ws.ws_col;
-#endif
-    return 120;
-}
-
-static void update_col_widths(int all, int date_w)
-{
-    int tw       = get_term_width();
-    int fixed    = 1 + (all ? COL_STAT + 3 : 0) + (date_w + 3) + (COL_TEXT + 3) + 3 + 3;
-    g_shrink_w   = (tw - fixed) / 2;
-    if (g_shrink_w < COL_MIN) g_shrink_w = COL_MIN;
-    if (g_shrink_w > COL_TEXT) g_shrink_w = COL_TEXT;
-}
-
-static const char* SECTION_NAMES[] = {
-    "ALREADY LATE", "IN A DAY", "IN A WEEK", "IN A MONTH", "IN A LIFE"
-};
-
-static const char* SECTION_COLORS[] = {
-    CLR_RED, CLR_YEL, CLR_GRN, CLR_CYN, CLR_BLU
-};
-
-static int get_section(time_t rem)
-{
-    if (rem <= 0)              return 0;
-    if (rem <= 24 * 3600)      return 1;
-    if (rem <= 7 * 24 * 3600)  return 2;
-    if (rem <= 31 * 24 * 3600) return 3;
-    return 4;
-}
-
 static int utf8_width(const char* s)
 {
     int w = 0;
@@ -512,13 +463,121 @@ static void trunc_field(char* dst, const char* src, int width)
     }
 }
 
+#define COL_STAT   4
+#define COL_DATE  17
+#define COL_CDOWN 22
+#define COL_MIN    5
+#define COL_BUF  128
+
+static int g_title_w = 5;
+static int g_place_w = 5;
+static int g_note_w  = 4;
+
+volatile int g_resized = 0;
+
+#ifndef _WIN32
+static void handle_winch(int sig) { (void)sig; g_resized = 1; }
+#endif
+
+void install_resize_handler(void)
+{
+#ifndef _WIN32
+    signal(SIGWINCH, handle_winch);
+#endif
+}
+
+static int get_term_width(void)
+{
+#ifdef _WIN32
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi))
+        return csbi.srWindow.Right - csbi.srWindow.Left + 1;
+#else
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0)
+        return ws.ws_col;
+#endif
+    return 120;
+}
+
+static void compute_col_widths(struct deadline* dl, int all, int date_w, int single)
+{
+    int max_t = 5, max_p = 5, max_n = 4;
+
+    if (single)
+    {
+        int tw = utf8_width(dl->title);
+        int pw = utf8_width(dl->place);
+        int nw = utf8_width(dl->note);
+        if (tw > max_t) max_t = tw;
+        if (pw > max_p) max_p = pw;
+        if (nw > max_n) max_n = nw;
+    }
+    else
+    {
+        while (dl)
+        {
+            if (all || !dl->ok)
+            {
+                int tw = utf8_width(dl->title);
+                int pw = utf8_width(dl->place);
+                int nw = utf8_width(dl->note);
+                if (tw > max_t) max_t = tw;
+                if (pw > max_p) max_p = pw;
+                if (nw > max_n) max_n = nw;
+            }
+            dl = dl->next;
+        }
+    }
+
+    int overhead = (all ? 20 : 13) + date_w;
+    int avail    = get_term_width() - overhead;
+    int total    = max_t + max_p + max_n;
+
+    if (total <= avail)
+    {
+        g_title_w = max_t;
+        g_place_w = max_p;
+        g_note_w  = max_n;
+    }
+    else
+    {
+        if (avail < COL_MIN * 3) avail = COL_MIN * 3;
+        double ratio = (double)avail / total;
+        g_title_w    = (int)(max_t * ratio);
+        g_place_w    = (int)(max_p * ratio);
+        g_note_w     = avail - g_title_w - g_place_w;
+        if (g_title_w < COL_MIN) g_title_w = COL_MIN;
+        if (g_place_w < COL_MIN) g_place_w = COL_MIN;
+        if (g_note_w  < COL_MIN) g_note_w  = COL_MIN;
+    }
+}
+
+static const char* SECTION_NAMES[] = {
+    "ALREADY LATE", "IN A DAY", "IN A WEEK", "IN A MONTH", "IN A LIFE"
+};
+
+static const char* SECTION_COLORS[] = {
+    CLR_RED, CLR_YEL, CLR_GRN, CLR_CYN, CLR_BLU
+};
+
+static int get_section(time_t rem)
+{
+    if (rem <= 0)              return 0;
+    if (rem <= 24 * 3600)      return 1;
+    if (rem <= 7 * 24 * 3600)  return 2;
+    if (rem <= 31 * 24 * 3600) return 3;
+    return 4;
+}
+
 static int table_width(int all, int date_w)
 {
     int w = 1;
     if (all) w += COL_STAT + 3;
     w += date_w + 3;
-    w += COL_TEXT + 3;
-    w += (g_shrink_w + 3) * 2;
+    w += g_title_w + 3;
+    w += g_place_w + 3;
+    w += g_note_w + 3;
     return w;
 }
 
@@ -530,13 +589,13 @@ static void print_border(int all, int date_w,
     if (all)
     {
         widths[0] = COL_STAT; widths[1] = date_w;
-        widths[2] = COL_TEXT; widths[3] = g_shrink_w; widths[4] = g_shrink_w;
+        widths[2] = g_title_w; widths[3] = g_place_w; widths[4] = g_note_w;
         ncols = 5;
     }
     else
     {
         widths[0] = date_w;
-        widths[1] = COL_TEXT; widths[2] = g_shrink_w; widths[3] = g_shrink_w;
+        widths[1] = g_title_w; widths[2] = g_place_w; widths[3] = g_note_w;
         ncols = 4;
     }
     printf("%s", l);
@@ -556,7 +615,7 @@ static void print_hdr_row(int all, int date_w, const char* label)
            " │ " CLR_DIM "%-*s" CLR_RESET
            " │ " CLR_DIM "%-*s" CLR_RESET
            " │ " CLR_DIM "%-*s" CLR_RESET " │\n",
-           date_w, label, COL_TEXT, "Title", g_shrink_w, "Place", g_shrink_w, "Note");
+           date_w, label, g_title_w, "Title", g_place_w, "Place", g_note_w, "Note");
 }
 
 static void print_section_title(int sec)
@@ -576,13 +635,13 @@ static void str_border(stringList** buf, int all, int date_w,
     if (all)
     {
         widths[0] = COL_STAT; widths[1] = date_w;
-        widths[2] = COL_TEXT; widths[3] = g_shrink_w; widths[4] = g_shrink_w;
+        widths[2] = g_title_w; widths[3] = g_place_w; widths[4] = g_note_w;
         ncols = 5;
     }
     else
     {
         widths[0] = date_w;
-        widths[1] = COL_TEXT; widths[2] = g_shrink_w; widths[3] = g_shrink_w;
+        widths[1] = g_title_w; widths[2] = g_place_w; widths[3] = g_note_w;
         ncols = 4;
     }
     strcat(s, l);
@@ -607,14 +666,14 @@ static void str_hdr_row(stringList** buf, int all, int date_w, const char* label
                  " │ " CLR_DIM "%-*s" CLR_RESET
                  " │ " CLR_DIM "%-*s" CLR_RESET " │\n",
                  COL_STAT, "Stat", date_w, label,
-                 COL_TEXT, "Title", g_shrink_w, "Place", g_shrink_w, "Note");
+                 g_title_w, "Title", g_place_w, "Place", g_note_w, "Note");
     else
         snprintf(row, sizeof(row),
                  "│ " CLR_DIM "%-*s" CLR_RESET
                  " │ " CLR_DIM "%-*s" CLR_RESET
                  " │ " CLR_DIM "%-*s" CLR_RESET
                  " │ " CLR_DIM "%-*s" CLR_RESET " │\n",
-                 date_w, label, COL_TEXT, "Title", g_shrink_w, "Place", g_shrink_w, "Note");
+                 date_w, label, g_title_w, "Title", g_place_w, "Place", g_note_w, "Note");
     new_str(buf, row);
 }
 
@@ -718,9 +777,9 @@ static void print_dl(struct deadline* dl, int all)
 {
     struct tm* t = gmtime(&dl->time);
     char title[COL_BUF], place[COL_BUF], note[COL_BUF];
-    trunc_field(title, dl->title, COL_TEXT);
-    trunc_field(place, dl->place, g_shrink_w);
-    trunc_field(note, dl->note, g_shrink_w);
+    trunc_field(title, dl->title, g_title_w);
+    trunc_field(place, dl->place, g_place_w);
+    trunc_field(note, dl->note, g_note_w);
 
     if (all)
         printf("│ %s%-*s%s │ %04d.%02d.%02d. %02d:%02d │ %s │ %s │ %s │\n",
@@ -737,7 +796,7 @@ static void print_dl(struct deadline* dl, int all)
 
 void print_dl_table(struct deadline* dl, int all)
 {
-    update_col_widths(all, COL_DATE);
+    compute_col_widths(dl, all, COL_DATE, 1);
     print_border(all, COL_DATE, "┌", "─", "┬", "┐");
     print_hdr_row(all, COL_DATE, "Date");
     print_border(all, COL_DATE, "├", "─", "┼", "┤");
@@ -752,9 +811,9 @@ static void str_cd_dl(struct deadline* dl, int all, time_t now, stringList** buf
     fmt_cd_time(rem, cd);
 
     char title[COL_BUF], place[COL_BUF], note[COL_BUF];
-    trunc_field(title, dl->title, COL_TEXT);
-    trunc_field(place, dl->place, g_shrink_w);
-    trunc_field(note, dl->note, g_shrink_w);
+    trunc_field(title, dl->title, g_title_w);
+    trunc_field(place, dl->place, g_place_w);
+    trunc_field(note, dl->note, g_note_w);
 
     char row[512];
     if (all)
@@ -775,7 +834,7 @@ static void str_cd_dl(struct deadline* dl, int all, time_t now, stringList** buf
 
 void print_list(struct deadline* List, int all)
 {
-    update_col_widths(all, COL_DATE);
+    compute_col_widths(List, all, COL_DATE, 0);
     time_t now;
     time(&now);
     int cur_sec  = -1;
@@ -808,7 +867,7 @@ void print_list(struct deadline* List, int all)
 
 void str_cd_list(struct deadline* List, int all, stringList** buffer)
 {
-    update_col_widths(all, COL_CDOWN);
+    compute_col_widths(List, all, COL_CDOWN, 0);
     time_t now;
     time(&now);
     int cur_sec  = -1;

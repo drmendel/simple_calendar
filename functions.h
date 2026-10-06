@@ -25,6 +25,7 @@
 #include <termios.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
+#include <signal.h>
 typedef unsigned char byte;
 int kbhit(void);
 int sc_getch(void);
@@ -77,5 +78,8 @@ void free_list(struct deadline*);
 struct deadline* new_dl(struct deadline*);
 void save_file(const char*, deadline*);
 deadline* read_file(FILE* file);
+
+extern volatile int g_resized;
+void install_resize_handler(void);
 
 #endif
