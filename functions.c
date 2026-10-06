@@ -485,17 +485,24 @@ static void fmt_cd_time(time_t rem, char* out)
     a       %= (24 * 3600);
     int h    = (int)(a / 3600);
     a       %= 3600;
-    int m    = (int)(a / 60);
+    int mi   = (int)(a / 60);
     int s    = (int)(a % 60);
+
+    int y = d / 365;
+    d    %= 365;
+    int mo = d / 30;
+    d     %= 30;
 
     char* p = out;
     if (rem < 0) *p++ = '-';
-    if (d > 365)
-        sprintf(p, "%dy %dd %02d:%02d:%02d", d / 365, d % 365, h, m, s);
+    if (y > 0)
+        sprintf(p, "%dy %dm %dd %02d:%02d:%02d", y, mo, d, h, mi, s);
+    else if (mo > 0)
+        sprintf(p, "%dm %dd %02d:%02d:%02d", mo, d, h, mi, s);
     else if (d > 0)
-        sprintf(p, "%dd %02d:%02d:%02d", d, h, m, s);
+        sprintf(p, "%dd %02d:%02d:%02d", d, h, mi, s);
     else
-        sprintf(p, "%02d:%02d:%02d", h, m, s);
+        sprintf(p, "%02d:%02d:%02d", h, mi, s);
 }
 
 #define COL_STAT   4

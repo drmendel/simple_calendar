@@ -121,15 +121,13 @@ int main(void)
             stringList* buffer = NULL;
             List               = mergeSort(List);
             install_resize_handler();
-            sc_clear();
+            printf("\x1b[?1049h");
+            fflush(stdout);
 
             while (1)
             {
                 if (g_resized)
-                {
-                    sc_clear();
                     g_resized = 0;
-                }
 
                 new_str(&buffer, CLR_BOLD "  SIMPLE CALENDAR" CLR_RESET "\n\n");
                 new_str(&buffer, CLR_BOLD "  COUNTDOWN" CLR_RESET "\n");
@@ -147,7 +145,8 @@ int main(void)
                 }
                 sleep_ms(1000);
             }
-            sc_clear();
+            printf("\x1b[?1049l");
+            fflush(stdout);
             cursor(1);
         }
 
